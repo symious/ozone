@@ -28,6 +28,8 @@ import org.apache.hadoop.ipc.ProtobufRpcEngine;
 import org.apache.hadoop.ipc.RPC;
 import org.apache.hadoop.net.NetUtils;
 import org.apache.hadoop.ozone.OmUtils;
+import org.apache.hadoop.ozone.om.exceptions.OMNotLeaderException;
+import org.apache.hadoop.ozone.om.ha.OMFailoverProxyProvider;
 import org.apache.hadoop.ozone.om.protocolPB.OmTransport;
 import org.apache.hadoop.ozone.om.protocolPB.OzoneManagerProtocolPB;
 import org.apache.hadoop.ozone.protocol.proto.OzoneManagerProtocolProtos.OMRequest;
@@ -67,6 +69,12 @@ public class Hadoop27RpcTransport implements OmTransport {
     try {
       return proxy.submitRequest(NULL_RPC_CONTROLLER, payload);
     } catch (ServiceException e) {
+      OMNotLeaderException notLeaderException =
+          OMFailoverProxyProvider.getNotLeaderException(e);
+      if (notLeaderException != null) {
+        throw new IOException("Hadoop2 Filesystem jar doesn't support OM-HA, " +
+            "please update to use Hadoop3 Filesystem jar.");
+      }
       throw new IOException("Service exception during the OM call", e);
     }
   }
