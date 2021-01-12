@@ -73,7 +73,7 @@ public class Hadoop27RpcTransport implements OmTransport {
           OMFailoverProxyProvider.getNotLeaderException(e);
       if (notLeaderException != null) {
         throw new IOException("Hadoop2 Filesystem jar doesn't support OM-HA, " +
-            "please update to use Hadoop3 Filesystem jar.");
+            "please update to use Hadoop3 Filesystem jar.", e);
       }
       throw new IOException("Service exception during the OM call", e);
     }

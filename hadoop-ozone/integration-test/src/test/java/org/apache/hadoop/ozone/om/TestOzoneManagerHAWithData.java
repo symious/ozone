@@ -17,9 +17,12 @@
 package org.apache.hadoop.ozone.om;
 
 import org.apache.commons.lang3.RandomStringUtils;
+import org.apache.hadoop.fs.ozone.Hadoop27OmTransportFactory;
 import org.apache.hadoop.hdds.client.ReplicationFactor;
 import org.apache.hadoop.hdds.client.ReplicationType;
+import org.apache.hadoop.hdds.conf.OzoneConfiguration;
 import org.apache.hadoop.ipc.RemoteException;
+import org.apache.hadoop.ozone.OmUtils;
 import org.apache.hadoop.ozone.OzoneConfigKeys;
 import org.apache.hadoop.ozone.client.ObjectStore;
 import org.apache.hadoop.ozone.client.OzoneBucket;
@@ -32,7 +35,16 @@ import org.apache.hadoop.ozone.om.exceptions.OMException;
 import org.apache.hadoop.ozone.om.ha.OMFailoverProxyProvider;
 import org.apache.hadoop.ozone.om.helpers.OmMultipartInfo;
 import org.apache.hadoop.ozone.om.helpers.OmMultipartUploadCompleteInfo;
+import org.apache.hadoop.ozone.om.helpers.OmVolumeArgs;
+import org.apache.hadoop.ozone.om.protocol.OzoneManagerProtocol;
+import org.apache.hadoop.ozone.om.protocolPB.Hadoop3OmTransportFactory;
+import org.apache.hadoop.ozone.om.protocolPB.OmTransport;
+import org.apache.hadoop.ozone.om.protocolPB.OmTransportFactory;
+import org.apache.hadoop.ozone.om.protocolPB.OzoneManagerProtocolClientSideTranslatorPB;
+import org.apache.hadoop.security.UserGroupInformation;
 import org.apache.hadoop.test.GenericTestUtils;
+import org.apache.hadoop.util.Time;
+import org.apache.ratis.protocol.ClientId;
 import org.junit.Assert;
 import org.junit.Ignore;
 import org.junit.Test;
@@ -46,6 +58,7 @@ import java.util.Map;
 import java.util.UUID;
 
 import static org.apache.hadoop.ozone.MiniOzoneHAClusterImpl.NODE_FAILURE_TIMEOUT;
+import static org.apache.hadoop.ozone.OmUtils.getOzoneManagerServiceId;
 import static org.apache.hadoop.ozone.om.exceptions.OMException.ResultCodes.DIRECTORY_NOT_FOUND;
 import static org.apache.hadoop.ozone.om.exceptions.OMException.ResultCodes.FILE_ALREADY_EXISTS;
 import static org.apache.hadoop.ozone.om.exceptions.OMException.ResultCodes.NOT_A_FILE;
@@ -609,6 +622,50 @@ public class TestOzoneManagerHAWithData extends TestOzoneManagerHA {
 
     validateListParts(ozoneBucket, keyName, uploadID, partsMap);
 
+  }
+
+  @Test
+  public void testNonOMHAClientOnHACluster() throws IOException {
+    ClientId clientId = ClientId.randomId();
+    UserGroupInformation ugi = UserGroupInformation.getCurrentUser();
+
+    ObjectStore objectStore = getObjectStore();
+    // Get the leader OM
+    String leaderOMNodeId = OmFailoverProxyUtil
+        .getFailoverProxyProvider(objectStore.getClientProxy())
+        .getCurrentProxyOMNodeId();
+
+    OzoneManager leaderOM = getCluster().getOzoneManager(leaderOMNodeId);
+
+    // Get follower OMs
+    String followerOM1NodeId = leaderOM.getPeerNodes().get(0).getOMNodeId();
+    String serviceId = leaderOM.getOMServiceId();
+    OzoneConfiguration nonOMHAConf = getConf();
+    String followerOM1AddressConfKey = OmUtils.addKeySuffixes(
+        OMConfigKeys.OZONE_OM_ADDRESS_KEY, serviceId, followerOM1NodeId);
+    nonOMHAConf.set(OMConfigKeys.OZONE_OM_ADDRESS_KEY,
+        getConf().get(followerOM1AddressConfKey));
+    OmTransport transport = new Hadoop27OmTransportFactory()
+        .createOmTransport(nonOMHAConf, ugi, serviceId);
+
+    OzoneManagerProtocol ozoneManagerClient =
+        new OzoneManagerProtocolClientSideTranslatorPB(
+            transport, clientId.toString());
+
+    String ownerName = "owner" + RandomStringUtils.randomNumeric(5);
+    String adminName = "admin" + RandomStringUtils.randomNumeric(5);
+    String volumeName = "volume" + RandomStringUtils.randomNumeric(5);
+
+    OmVolumeArgs omVolumeArgs = new OmVolumeArgs.Builder().setVolume(volumeName)
+        .setAdminName(adminName).setCreationTime(Time.now())
+        .setOwnerName(ownerName).build();
+
+    try {
+      ozoneManagerClient.createVolume(omVolumeArgs);
+    } catch (IOException e){
+      GenericTestUtils.assertExceptionContains(
+          "Hadoop2 Filesystem jar doesn't support OM-HA", e);
+    }
   }
 
   /**
