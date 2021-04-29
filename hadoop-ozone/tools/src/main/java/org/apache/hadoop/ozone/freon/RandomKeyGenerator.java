@@ -228,7 +228,11 @@ public final class RandomKeyGenerator implements Callable<Void> {
   private AtomicInteger numberOfVolumesCreated;
   private AtomicInteger numberOfBucketsCreated;
   private AtomicLong numberOfKeysAdded;
+
+  private AtomicInteger cleanedVolumeCounter;
+  private AtomicInteger cleanedBucketCounter;
   private AtomicInteger numberOfBucketsCleaned;
+  private AtomicInteger numberOfVolumesCleaned;
 
   private Long totalWritesValidated;
   private Long writeValidationSuccessCount;
@@ -265,6 +269,9 @@ public final class RandomKeyGenerator implements Callable<Void> {
     keyCounter = new AtomicLong();
     volumes = new ConcurrentHashMap<>();
     buckets = new ConcurrentHashMap<>();
+    cleanedVolumeCounter = new AtomicInteger();
+    cleanedBucketCounter = new AtomicInteger();
+    numberOfVolumesCleaned = new AtomicInteger();
     if (omServiceID != null) {
       ozoneClient = OzoneClientFactory.getRpcClient(omServiceID, configuration);
     } else {
@@ -576,6 +583,25 @@ public final class RandomKeyGenerator implements Callable<Void> {
   }
 
   /**
+   * Returns the number of volumes cleaned.
+   *
+   * @return cleaned volume count.
+   */
+  @VisibleForTesting
+  int getNumberOfVolumesCleaned() {
+    return numberOfVolumesCleaned.get();
+  }
+
+  /**
+   * Returns the number of buckets cleaned.
+   *
+   * @return cleaned bucket count.
+   */
+  @VisibleForTesting
+  int getNumberOfBucketsCleaned() {
+    return numberOfBucketsCleaned.get();
+  }
+  /**
    * Returns true if random validation of write is enabled.
    *
    * @return validateWrites
@@ -679,14 +705,14 @@ public final class RandomKeyGenerator implements Callable<Void> {
     @Override
     public void run() {
       int b;
-      while ((b = bucketCounter.getAndDecrement()) >= 0) {
+      while ((b = cleanedBucketCounter.getAndIncrement()) < totalBucketCount) {
         if (!cleanBucket(b)) {
           return;
         }
       }
 
       int v;
-      while ((v = volumeCounter.getAndDecrement()) >= 0) {
+      while ((v = cleanedVolumeCounter.getAndIncrement()) < numOfVolumes) {
         if (!cleanVolume(v)) {
           return;
         }
@@ -821,6 +847,7 @@ public final class RandomKeyGenerator implements Callable<Void> {
     try (AutoCloseable scope = TracingUtil
         .createActivatedSpan("cleanVolume")) {
       objectStore.deleteVolume(volumeName);
+      numberOfVolumesCleaned.getAndIncrement();
       return true;
     } catch (Throwable e) {
       exception = e;
@@ -1228,5 +1255,10 @@ public final class RandomKeyGenerator implements Callable<Void> {
   @VisibleForTesting
   public int getThreadPoolSize() {
     return threadPoolSize;
+  }
+
+  @VisibleForTesting
+  public void setCleanObjects(boolean cleanObjects) {
+    this.cleanObjects = cleanObjects;
   }
 }
