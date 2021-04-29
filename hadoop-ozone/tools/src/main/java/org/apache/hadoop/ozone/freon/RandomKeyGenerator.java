@@ -37,7 +37,6 @@ import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
-import java.util.function.IntSupplier;
 import java.util.function.LongSupplier;
 
 import org.apache.hadoop.hdds.HddsConfigKeys;
@@ -70,7 +69,6 @@ import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import org.apache.commons.codec.digest.DigestUtils;
 import org.apache.commons.lang3.RandomStringUtils;
 import org.apache.commons.lang3.time.DurationFormatUtils;
-import org.checkerframework.checker.units.qual.A;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import picocli.CommandLine.Command;
@@ -378,37 +376,10 @@ public final class RandomKeyGenerator implements Callable<Void> {
     printStats(System.out);
 
     if (cleanObjects) {
-      latch = new CountDownLatch(numOfThreads);
-      for (int i = 0; i < numOfThreads; i++) {
-        executor.execute(new ObjectCleaner());
-      }
-      LongSupplier currentCleanedBucket = numberOfBucketsCleaned::get;
-      progressbar = new ProgressBar(System.out, totalBucketCount,
-          currentCleanedBucket);
-
-      LOG.info("Starting clean progress bar Thread.");
-
-      progressbar.start();
-
-      // wait until all Buckets are cleaned or exception occurred.
-      while ((numberOfBucketsCleaned.get() != totalBucketCount)
-          && exception == null) {
-        try {
-          Thread.sleep(CHECK_INTERVAL_MILLIS);
-        } catch (InterruptedException e) {
-          throw e;
-        }
-      }
-      latch.await();
-      cleanCompleted = true;
-
-      if (exception != null) {
-        progressbar.terminate();
-      } else {
-        progressbar.shutdown();
-      }
+      doCleanObjects();
     }
 
+    executor.shutdown();
     ozoneClient.close();
     if (exception != null) {
       throw new RuntimeException(exception);
@@ -427,6 +398,46 @@ public final class RandomKeyGenerator implements Callable<Void> {
           }
         }));
   }
+
+  private void doCleanObjects() throws InterruptedException {
+    // Clean Buckets first
+    latch = new CountDownLatch(numOfThreads);
+    for (int i = 0; i < numOfThreads; i++) {
+      executor.execute(new BucketCleaner());
+    }
+    LongSupplier currentValue = numberOfBucketsCleaned::get;
+    progressbar = new ProgressBar(System.out, totalBucketCount, currentValue);
+
+    LOG.info("Starting clean progress bar Thread.");
+    progressbar.start();
+
+    // wait until all Buckets are cleaned or exception occurred.
+    while ((numberOfBucketsCleaned.get() != totalBucketCount)
+        && exception == null) {
+      try {
+        Thread.sleep(CHECK_INTERVAL_MILLIS);
+      } catch (InterruptedException e) {
+        throw e;
+      }
+    }
+    latch.await();
+
+    // Clean Volume after cleaning Bucket
+    int v;
+    while ((v = cleanedVolumeCounter.getAndIncrement()) < numOfVolumes) {
+      if (!cleanVolume(v)) {
+        return;
+      }
+    }
+    cleanCompleted = true;
+
+    if (exception != null) {
+      progressbar.terminate();
+    } else {
+      progressbar.shutdown();
+    }
+  }
+
   /**
    * Prints stats of {@link Freon} run to the PrintStream.
    *
@@ -677,47 +688,47 @@ public final class RandomKeyGenerator implements Callable<Void> {
   private class ObjectCreator implements Runnable {
     @Override
     public void run() {
-      int v;
-      while ((v = volumeCounter.getAndIncrement()) < numOfVolumes) {
-        if (!createVolume(v)) {
-          return;
+      try {
+        int v;
+        while ((v = volumeCounter.getAndIncrement()) < numOfVolumes) {
+          if (!createVolume(v)) {
+            return;
+          }
         }
-      }
 
-      int b;
-      while ((b = bucketCounter.getAndIncrement()) < totalBucketCount) {
-        if (!createBucket(b)) {
-          return;
+        int b;
+        while ((b = bucketCounter.getAndIncrement()) < totalBucketCount) {
+          if (!createBucket(b)) {
+            return;
+          }
         }
-      }
 
-      long k;
-      while ((k = keyCounter.getAndIncrement()) < totalKeyCount) {
-        if (!createKey(k)) {
-          return;
+        long k;
+        while ((k = keyCounter.getAndIncrement()) < totalKeyCount) {
+          if (!createKey(k)) {
+            return;
+          }
         }
+      } finally {
+        latch.countDown();
       }
-      latch.countDown();
     }
   }
 
-  private class ObjectCleaner implements Runnable {
+  private class BucketCleaner implements Runnable {
     @Override
     public void run() {
-      int b;
-      while ((b = cleanedBucketCounter.getAndIncrement()) < totalBucketCount) {
-        if (!cleanBucket(b)) {
-          return;
+      try {
+        int b;
+        while ((b = cleanedBucketCounter.getAndIncrement()) <
+            totalBucketCount) {
+          if (!cleanBucket(b)) {
+            return;
+          }
         }
+      } finally {
+        latch.countDown();
       }
-
-      int v;
-      while ((v = cleanedVolumeCounter.getAndIncrement()) < numOfVolumes) {
-        if (!cleanVolume(v)) {
-          return;
-        }
-      }
-      latch.countDown();
     }
   }
 

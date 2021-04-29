@@ -189,6 +189,7 @@ public class TestRandomKeyGenerator {
     randomKeyGenerator.setNumOfKeys(10);
     randomKeyGenerator.setFactor(ReplicationFactor.THREE);
     randomKeyGenerator.setType(ReplicationType.RATIS);
+    randomKeyGenerator.setNumOfThreads(10);
     randomKeyGenerator.setCleanObjects(true);
     randomKeyGenerator.call();
     Assert.assertEquals(2, randomKeyGenerator.getNumberOfVolumesCreated());
