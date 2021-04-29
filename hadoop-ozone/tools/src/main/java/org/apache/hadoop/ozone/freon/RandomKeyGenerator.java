@@ -30,12 +30,14 @@ import java.util.Map;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.IntSupplier;
 import java.util.function.LongSupplier;
 
 import org.apache.hadoop.hdds.HddsConfigKeys;
@@ -68,6 +70,7 @@ import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import org.apache.commons.codec.digest.DigestUtils;
 import org.apache.commons.lang3.RandomStringUtils;
 import org.apache.commons.lang3.time.DurationFormatUtils;
+import org.checkerframework.checker.units.qual.A;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import picocli.CommandLine.Command;
@@ -111,6 +114,7 @@ public final class RandomKeyGenerator implements Callable<Void> {
       LoggerFactory.getLogger(RandomKeyGenerator.class);
 
   private volatile boolean completed = false;
+  private volatile boolean cleanCompleted = false;
   private volatile Throwable exception;
 
   @Option(names = {"--num-of-threads", "--numOfThreads"},
@@ -189,11 +193,19 @@ public final class RandomKeyGenerator implements Callable<Void> {
   )
   private String omServiceID = null;
 
+  @Option(
+      names = "--clean-objects",
+      description = "Specifies whether to clean the random generated " +
+          "volumes, buckets and keys."
+  )
+  private boolean cleanObjects = false;
+
   private int threadPoolSize;
 
   private OzoneClient ozoneClient;
   private ObjectStore objectStore;
   private ExecutorService executor;
+  private ExecutorService cleanExecutor;
 
   private long startTime;
   private long jobStartTime;
@@ -216,6 +228,7 @@ public final class RandomKeyGenerator implements Callable<Void> {
   private AtomicInteger numberOfVolumesCreated;
   private AtomicInteger numberOfBucketsCreated;
   private AtomicLong numberOfKeysAdded;
+  private AtomicInteger numberOfBucketsCleaned;
 
   private Long totalWritesValidated;
   private Long writeValidationSuccessCount;
@@ -226,6 +239,7 @@ public final class RandomKeyGenerator implements Callable<Void> {
 
   private OzoneConfiguration ozoneConfiguration;
   private ProgressBar progressbar;
+  private ProgressBar cleanProgressbar;
 
   RandomKeyGenerator() {
   }
@@ -246,6 +260,7 @@ public final class RandomKeyGenerator implements Callable<Void> {
     numberOfVolumesCreated = new AtomicInteger();
     numberOfBucketsCreated = new AtomicInteger();
     numberOfKeysAdded = new AtomicLong();
+    numberOfBucketsCleaned = new AtomicInteger();
     volumeCounter = new AtomicInteger();
     bucketCounter = new AtomicInteger();
     keyCounter = new AtomicLong();
@@ -299,6 +314,9 @@ public final class RandomKeyGenerator implements Callable<Void> {
     LOG.info("Number of Threads: {}", numOfThreads);
     threadPoolSize = numOfThreads;
     executor = Executors.newFixedThreadPool(threadPoolSize);
+    if (cleanObjects) {
+      cleanExecutor = Executors.newFixedThreadPool(threadPoolSize);
+    }
     addShutdownHook();
 
     LOG.info("Number of Volumes: {}.", numOfVolumes);
@@ -307,6 +325,7 @@ public final class RandomKeyGenerator implements Callable<Void> {
     LOG.info("Key size: {} bytes", keySize);
     LOG.info("Buffer size: {} bytes", bufferSize);
     LOG.info("validateWrites : {}", validateWrites);
+    LOG.info("cleanObjects : {}", cleanObjects);
     for (int i = 0; i < numOfThreads; i++) {
       executor.execute(new ObjectCreator());
     }
@@ -352,6 +371,35 @@ public final class RandomKeyGenerator implements Callable<Void> {
     if (validator != null) {
       validator.join();
     }
+
+    printStats(System.out);
+
+    if (cleanObjects) {
+      for (int i = 0; i < numOfThreads; i++) {
+        cleanExecutor.execute(new ObjectCleaner());
+      }
+      LongSupplier currentCleanedBucket = numberOfBucketsCleaned::get;
+      cleanProgressbar = new ProgressBar(System.out, totalBucketCount,
+          currentCleanedBucket);
+
+      LOG.info("Starting clean progress bar Thread.");
+
+      cleanProgressbar.start();
+
+      // wait until all Buckets are cleaned or exception occurred.
+      while ((numberOfBucketsCleaned.get() != totalBucketCount)
+          && exception == null) {
+        try {
+          Thread.sleep(CHECK_INTERVAL_MILLIS);
+        } catch (InterruptedException e) {
+          throw e;
+        }
+      }
+      cleanExecutor.shutdown();
+      cleanExecutor.awaitTermination(Integer.MAX_VALUE, TimeUnit.MILLISECONDS);
+      cleanCompleted = true;
+    }
+
     ozoneClient.close();
     if (exception != null) {
       throw new RuntimeException(exception);
@@ -365,7 +413,6 @@ public final class RandomKeyGenerator implements Callable<Void> {
   private void addShutdownHook() {
     Runtime.getRuntime().addShutdownHook(
         new Thread(() -> {
-          printStats(System.out);
           if (freon != null) {
             freon.stopHttpServer();
           }
@@ -625,6 +672,25 @@ public final class RandomKeyGenerator implements Callable<Void> {
     }
   }
 
+  private class ObjectCleaner implements Runnable {
+    @Override
+    public void run() {
+      int b;
+      while ((b = bucketCounter.getAndIncrement()) < totalBucketCount) {
+        if (!cleanBucket(b)) {
+          return;
+        }
+      }
+
+      int v;
+      while ((v = volumeCounter.getAndIncrement()) < numOfVolumes) {
+        if (!cleanVolume(v)) {
+          return;
+        }
+      }
+    }
+  }
+
   private boolean createVolume(int volumeNumber) {
     String volumeName = "vol-" + volumeNumber + "-"
         + RandomStringUtils.randomNumeric(5);
@@ -740,6 +806,45 @@ public final class RandomKeyGenerator implements Callable<Void> {
       exception = e;
       LOG.error("Exception while adding key: {} in bucket: {}" +
           " of volume: {}.", keyName, bucketName, volumeName, e);
+      return false;
+    }
+  }
+
+  private boolean cleanVolume(int volumeNumber) {
+    OzoneVolume volume = getVolume(volumeNumber);
+    String volumeName = volume.getName();
+    LOG.trace("Cleaning volume: {}", volumeName);
+    try (AutoCloseable scope = TracingUtil
+        .createActivatedSpan("cleanVolume")) {
+      objectStore.deleteVolume(volumeName);
+      return true;
+    } catch (Throwable e) {
+      exception = e;
+      LOG.error("Could not clean volume", e);
+      return false;
+    }
+  }
+
+  private boolean cleanBucket(int globalBucketNumber) {
+    int volumeNumber = globalBucketNumber % numOfVolumes;
+    OzoneVolume volume = getVolume(volumeNumber);
+    OzoneBucket bucket = getBucket(globalBucketNumber);
+    String bucketName = bucket.getName();
+    if (volume == null) {
+      LOG.error("Could not find volume {}", volumeNumber);
+      return false;
+    }
+    LOG.trace("Cleaning bucket: {} in volume: {}",
+        bucketName, volume.getName());
+    ArrayList<String> keys = new ArrayList<>();
+    try {
+      bucket.listKeys(null).forEachRemaining(x -> keys.add(x.getName()));
+      bucket.deleteKeys(keys);
+      volume.deleteBucket(bucketName);
+      return true;
+    } catch (Throwable e) {
+      exception = e;
+      LOG.error("Could not clean bucket ", e);
       return false;
     }
   }
