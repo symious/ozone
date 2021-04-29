@@ -841,6 +841,7 @@ public final class RandomKeyGenerator implements Callable<Void> {
       bucket.listKeys(null).forEachRemaining(x -> keys.add(x.getName()));
       bucket.deleteKeys(keys);
       volume.deleteBucket(bucketName);
+      numberOfBucketsCleaned.getAndIncrement();
       return true;
     } catch (Throwable e) {
       exception = e;
