@@ -676,14 +676,14 @@ public final class RandomKeyGenerator implements Callable<Void> {
     @Override
     public void run() {
       int b;
-      while ((b = bucketCounter.getAndIncrement()) < totalBucketCount) {
+      while ((b = bucketCounter.getAndDecrement()) >= 0) {
         if (!cleanBucket(b)) {
           return;
         }
       }
 
       int v;
-      while ((v = volumeCounter.getAndIncrement()) < numOfVolumes) {
+      while ((v = volumeCounter.getAndDecrement()) >= 0) {
         if (!cleanVolume(v)) {
           return;
         }
