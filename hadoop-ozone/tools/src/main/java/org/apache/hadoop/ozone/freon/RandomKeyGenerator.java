@@ -205,7 +205,7 @@ public final class RandomKeyGenerator implements Callable<Void> {
   private OzoneClient ozoneClient;
   private ObjectStore objectStore;
   private ExecutorService executor;
-  private ExecutorService cleanExecutor;
+  private CountDownLatch latch;
 
   private long startTime;
   private long jobStartTime;
@@ -239,7 +239,6 @@ public final class RandomKeyGenerator implements Callable<Void> {
 
   private OzoneConfiguration ozoneConfiguration;
   private ProgressBar progressbar;
-  private ProgressBar cleanProgressbar;
 
   RandomKeyGenerator() {
   }
@@ -314,9 +313,6 @@ public final class RandomKeyGenerator implements Callable<Void> {
     LOG.info("Number of Threads: {}", numOfThreads);
     threadPoolSize = numOfThreads;
     executor = Executors.newFixedThreadPool(threadPoolSize);
-    if (cleanObjects) {
-      cleanExecutor = Executors.newFixedThreadPool(threadPoolSize);
-    }
     addShutdownHook();
 
     LOG.info("Number of Volumes: {}.", numOfVolumes);
@@ -326,6 +322,7 @@ public final class RandomKeyGenerator implements Callable<Void> {
     LOG.info("Buffer size: {} bytes", bufferSize);
     LOG.info("validateWrites : {}", validateWrites);
     LOG.info("cleanObjects : {}", cleanObjects);
+    latch = new CountDownLatch(numOfThreads);
     for (int i = 0; i < numOfThreads; i++) {
       executor.execute(new ObjectCreator());
     }
@@ -358,8 +355,7 @@ public final class RandomKeyGenerator implements Callable<Void> {
         throw e;
       }
     }
-    executor.shutdown();
-    executor.awaitTermination(Integer.MAX_VALUE, TimeUnit.MILLISECONDS);
+    latch.await();
     completed = true;
 
     if (exception != null) {
@@ -375,16 +371,17 @@ public final class RandomKeyGenerator implements Callable<Void> {
     printStats(System.out);
 
     if (cleanObjects) {
+      latch = new CountDownLatch(numOfThreads);
       for (int i = 0; i < numOfThreads; i++) {
-        cleanExecutor.execute(new ObjectCleaner());
+        executor.execute(new ObjectCleaner());
       }
       LongSupplier currentCleanedBucket = numberOfBucketsCleaned::get;
-      cleanProgressbar = new ProgressBar(System.out, totalBucketCount,
+      progressbar = new ProgressBar(System.out, totalBucketCount,
           currentCleanedBucket);
 
       LOG.info("Starting clean progress bar Thread.");
 
-      cleanProgressbar.start();
+      progressbar.start();
 
       // wait until all Buckets are cleaned or exception occurred.
       while ((numberOfBucketsCleaned.get() != totalBucketCount)
@@ -395,9 +392,14 @@ public final class RandomKeyGenerator implements Callable<Void> {
           throw e;
         }
       }
-      cleanExecutor.shutdown();
-      cleanExecutor.awaitTermination(Integer.MAX_VALUE, TimeUnit.MILLISECONDS);
+      latch.await();
       cleanCompleted = true;
+
+      if (exception != null) {
+        progressbar.terminate();
+      } else {
+        progressbar.shutdown();
+      }
     }
 
     ozoneClient.close();
@@ -669,6 +671,7 @@ public final class RandomKeyGenerator implements Callable<Void> {
           return;
         }
       }
+      latch.countDown();
     }
   }
 
@@ -688,6 +691,7 @@ public final class RandomKeyGenerator implements Callable<Void> {
           return;
         }
       }
+      latch.countDown();
     }
   }
 
