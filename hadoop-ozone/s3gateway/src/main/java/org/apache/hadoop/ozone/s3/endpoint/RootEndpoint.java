@@ -27,6 +27,7 @@ import org.apache.hadoop.ozone.client.OzoneBucket;
 import org.apache.hadoop.ozone.s3.commontypes.BucketMetadata;
 import org.apache.hadoop.ozone.s3.exception.OS3Exception;
 
+import org.apache.hadoop.ozone.s3.exception.S3ErrorTable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -46,21 +47,26 @@ public class RootEndpoint extends EndpointBase {
    * for more details.
    */
   @GET
-  public Response get()
-      throws OS3Exception, IOException {
+  public Response get() throws OS3Exception {
     ListBucketResponse response = new ListBucketResponse();
 
-    Iterator<? extends OzoneBucket> bucketIterator = listS3Buckets(null);
+    try {
+      Iterator<? extends OzoneBucket> bucketIterator = listS3Buckets(null);
 
-    while (bucketIterator.hasNext()) {
-      OzoneBucket next = bucketIterator.next();
-      BucketMetadata bucketMetadata = new BucketMetadata();
-      bucketMetadata.setName(next.getName());
-      bucketMetadata.setCreationDate(next.getCreationTime());
-      response.addBucket(bucketMetadata);
+      while (bucketIterator.hasNext()) {
+        OzoneBucket next = bucketIterator.next();
+        BucketMetadata bucketMetadata = new BucketMetadata();
+        bucketMetadata.setName(next.getName());
+        bucketMetadata.setCreationDate(next.getCreationTime());
+        response.addBucket(bucketMetadata);
+      }
+
+      return Response.ok(response).build();
+    } catch (OS3Exception ex) {
+      throw ex;
+    } catch (IOException e) {
+      throw S3ErrorTable.getInternalError(e);
     }
-
-    return Response.ok(response).build();
   }
 
   @Override

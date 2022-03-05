@@ -159,17 +159,17 @@ public class ObjectEndpoint extends EndpointBase {
       @HeaderParam("Content-Length") long length,
       @QueryParam("partNumber")  int partNumber,
       @QueryParam("uploadId") @DefaultValue("") String uploadID,
-      InputStream body) throws IOException, OS3Exception {
+      InputStream body) throws OS3Exception, IOException {
 
     OzoneOutputStream output = null;
 
-    if (uploadID != null && !uploadID.equals("")) {
-      // If uploadID is specified, it is a request for upload part
-      return createMultipartKey(bucketName, keyPath, length,
-          partNumber, uploadID, body);
-    }
-
     try {
+      if (uploadID != null && !uploadID.equals("")) {
+        // If uploadID is specified, it is a request for upload part
+        return createMultipartKey(bucketName, keyPath, length,
+            partNumber, uploadID, body);
+      }
+
       String copyHeader = headers.getHeaderString(COPY_SOURCE_HEADER);
       String storageType = headers.getHeaderString(STORAGE_CLASS_HEADER);
 
@@ -222,7 +222,11 @@ public class ObjectEndpoint extends EndpointBase {
         throw newError(S3ErrorTable.ACCESS_DENIED, keyPath, ex);
       }
       LOG.error("Exception occurred in PutObject", ex);
+      throw S3ErrorTable.getInternalError(ex);
+    } catch (OS3Exception ex) {
       throw ex;
+    } catch (IOException ex) {
+      throw S3ErrorTable.getInternalError(ex);
     } finally {
       if (output != null) {
         output.close();
@@ -246,7 +250,7 @@ public class ObjectEndpoint extends EndpointBase {
       @QueryParam("uploadId") String uploadId,
       @QueryParam("max-parts") @DefaultValue("1000") int maxParts,
       @QueryParam("part-number-marker") String partNumberMarker,
-      InputStream body) throws IOException, OS3Exception {
+      InputStream body) throws OS3Exception {
     try {
 
       if (uploadId != null) {
@@ -329,8 +333,12 @@ public class ObjectEndpoint extends EndpointBase {
       } else if (ex.getResult() == ResultCodes.PERMISSION_DENIED) {
         throw newError(S3ErrorTable.ACCESS_DENIED, keyPath, ex);
       } else {
-        throw ex;
+        throw S3ErrorTable.getInternalError(ex);
       }
+    } catch (OS3Exception ex) {
+      throw ex;
+    } catch (IOException ex) {
+      throw S3ErrorTable.getInternalError(ex);
     }
   }
 
@@ -354,7 +362,7 @@ public class ObjectEndpoint extends EndpointBase {
   @HEAD
   public Response head(
       @PathParam("bucket") String bucketName,
-      @PathParam("path") String keyPath) throws IOException, OS3Exception {
+      @PathParam("path") String keyPath) throws OS3Exception {
 
     OzoneKey key;
 
@@ -368,8 +376,12 @@ public class ObjectEndpoint extends EndpointBase {
       } else if (ex.getResult() == ResultCodes.PERMISSION_DENIED) {
         throw newError(S3ErrorTable.ACCESS_DENIED, keyPath, ex);
       } else {
-        throw ex;
+        throw S3ErrorTable.getInternalError(ex);
       }
+    } catch (OS3Exception ex) {
+      throw ex;
+    } catch (IOException ex) {
+      throw S3ErrorTable.getInternalError(ex);
     }
 
     ResponseBuilder response = Response.ok().status(HttpStatus.SC_OK)
@@ -420,7 +432,7 @@ public class ObjectEndpoint extends EndpointBase {
       @PathParam("bucket") String bucketName,
       @PathParam("path") String keyPath,
       @QueryParam("uploadId") @DefaultValue("") String uploadId) throws
-      IOException, OS3Exception {
+      OS3Exception {
 
     try {
       if (uploadId != null && !uploadId.equals("")) {
@@ -443,9 +455,12 @@ public class ObjectEndpoint extends EndpointBase {
       } else if (ex.getResult() == ResultCodes.PERMISSION_DENIED) {
         throw newError(S3ErrorTable.ACCESS_DENIED, keyPath, ex);
       } else {
-        throw ex;
+        throw S3ErrorTable.getInternalError(ex);
       }
-
+    } catch (OS3Exception ex) {
+      throw ex;
+    } catch (IOException ex) {
+      throw S3ErrorTable.getInternalError(ex);
     }
     return Response
         .status(Status.NO_CONTENT)
@@ -464,7 +479,7 @@ public class ObjectEndpoint extends EndpointBase {
       @PathParam("bucket") String bucket,
       @PathParam("path") String key
   )
-      throws IOException, OS3Exception {
+      throws OS3Exception {
     try {
       OzoneBucket ozoneBucket = getBucket(bucket);
       String storageType = headers.getHeaderString(STORAGE_CLASS_HEADER);
@@ -496,7 +511,11 @@ public class ObjectEndpoint extends EndpointBase {
       }
       LOG.error("Error in Initiate Multipart Upload Request for bucket: {}, " +
           "key: {}", bucket, key, ex);
+      throw S3ErrorTable.getInternalError(ex);
+    } catch (OS3Exception ex) {
       throw ex;
+    } catch (IOException ex) {
+      throw S3ErrorTable.getInternalError(ex);
     }
   }
 
@@ -509,15 +528,16 @@ public class ObjectEndpoint extends EndpointBase {
       @PathParam("path") String key,
       @QueryParam("uploadId") @DefaultValue("") String uploadID,
       CompleteMultipartUploadRequest multipartUploadRequest)
-      throws IOException, OS3Exception {
-    OzoneBucket ozoneBucket = getBucket(bucket);
-    // Using LinkedHashMap to preserve ordering of parts list.
-    Map<Integer, String> partsMap = new LinkedHashMap<>();
-    List<CompleteMultipartUploadRequest.Part> partList =
-        multipartUploadRequest.getPartList();
-
-    OmMultipartUploadCompleteInfo omMultipartUploadCompleteInfo;
+      throws OS3Exception {
     try {
+      OzoneBucket ozoneBucket = getBucket(bucket);
+      // Using LinkedHashMap to preserve ordering of parts list.
+      Map<Integer, String> partsMap = new LinkedHashMap<>();
+      List<CompleteMultipartUploadRequest.Part> partList =
+          multipartUploadRequest.getPartList();
+
+      OmMultipartUploadCompleteInfo omMultipartUploadCompleteInfo;
+
       for (CompleteMultipartUploadRequest.Part part : partList) {
         partsMap.put(part.getPartNumber(), part.geteTag());
       }
@@ -563,7 +583,11 @@ public class ObjectEndpoint extends EndpointBase {
       }
       LOG.error("Error in Complete Multipart Upload Request for bucket: {}, " +
           ", key: {}", bucket, key, ex);
+      throw S3ErrorTable.getInternalError(ex);
+    } catch (OS3Exception ex) {
       throw ex;
+    } catch (IOException ex) {
+      throw S3ErrorTable.getInternalError(ex);
     }
   }
 

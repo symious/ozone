@@ -100,143 +100,149 @@ public class BucketEndpoint extends EndpointBase {
       @QueryParam("start-after") String startAfter,
       @QueryParam("uploads") String uploads,
       @QueryParam("acl") String aclMarker,
-      @Context HttpHeaders hh) throws OS3Exception, IOException {
+      @Context HttpHeaders hh) throws OS3Exception {
 
-    if (aclMarker != null) {
-      S3BucketAcl result = getAcl(bucketName);
-      return Response.ok(result, MediaType.APPLICATION_XML_TYPE).build();
-    }
+    try {
+      if (aclMarker != null) {
+        S3BucketAcl result = getAcl(bucketName);
+        return Response.ok(result, MediaType.APPLICATION_XML_TYPE).build();
+      }
 
-    if (browser != null) {
-      InputStream browserPage = getClass()
-          .getResourceAsStream("/browser.html");
-      return Response.ok(browserPage,
-            MediaType.TEXT_HTML_TYPE)
+      if (browser != null) {
+        InputStream browserPage = getClass()
+            .getResourceAsStream("/browser.html");
+        return Response.ok(browserPage,
+                MediaType.TEXT_HTML_TYPE)
             .build();
 
-    }
-
-    if (uploads != null) {
-      return listMultipartUploads(bucketName, prefix);
-    }
-
-    if (prefix == null) {
-      prefix = "";
-    }
-
-    OzoneBucket bucket = getBucket(bucketName);
-
-    Iterator<? extends OzoneKey> ozoneKeyIterator;
-
-    ContinueToken decodedToken =
-        ContinueToken.decodeFromString(continueToken);
-
-    // Assign marker to startAfter. for the compatibility of aws api v1
-    if (startAfter == null && marker != null) {
-      startAfter = marker;
-    }
-    try {
-      if (startAfter != null && continueToken != null) {
-        // If continuation token and start after both are provided, then we
-        // ignore start After
-        ozoneKeyIterator = bucket.listKeys(prefix, decodedToken.getLastKey());
-      } else if (startAfter != null && continueToken == null) {
-        ozoneKeyIterator = bucket.listKeys(prefix, startAfter);
-      } else if (startAfter == null && continueToken != null) {
-        ozoneKeyIterator = bucket.listKeys(prefix, decodedToken.getLastKey());
-      } else {
-        ozoneKeyIterator = bucket.listKeys(prefix);
       }
-    } catch (OMException ex) {
-      if (ex.getResult() == ResultCodes.PERMISSION_DENIED) {
-        throw newError(S3ErrorTable.ACCESS_DENIED, bucketName, ex);
-      } else {
-        throw ex;
+
+      if (uploads != null) {
+        return listMultipartUploads(bucketName, prefix);
       }
-    }
 
-    ListObjectResponse response = new ListObjectResponse();
-    response.setDelimiter(delimiter);
-    response.setName(bucketName);
-    response.setPrefix(prefix);
-    response.setMarker(marker == null ? "" : marker);
-    response.setMaxKeys(maxKeys);
-    response.setEncodingType(ENCODING_TYPE);
-    response.setTruncated(false);
-    response.setContinueToken(continueToken);
+      if (prefix == null) {
+        prefix = "";
+      }
 
-    String prevDir = null;
-    if (continueToken != null) {
-      prevDir = decodedToken.getLastDir();
-    }
-    String lastKey = null;
-    int count = 0;
-    while (ozoneKeyIterator.hasNext()) {
-      OzoneKey next = ozoneKeyIterator.next();
-      String relativeKeyName = next.getName().substring(prefix.length());
+      OzoneBucket bucket = getBucket(bucketName);
 
-      int depth = StringUtils.countMatches(relativeKeyName, delimiter);
-      if (delimiter != null) {
-        if (depth > 0) {
-          // means key has multiple delimiters in its value.
-          // ex: dir/dir1/dir2, where delimiter is "/" and prefix is dir/
-          String dirName = relativeKeyName.substring(0, relativeKeyName
-              .indexOf(delimiter));
-          if (!dirName.equals(prevDir)) {
-            response.addPrefix(prefix + dirName + delimiter);
-            prevDir = dirName;
+      Iterator<? extends OzoneKey> ozoneKeyIterator;
+
+      ContinueToken decodedToken =
+          ContinueToken.decodeFromString(continueToken);
+
+      // Assign marker to startAfter. for the compatibility of aws api v1
+      if (startAfter == null && marker != null) {
+        startAfter = marker;
+      }
+      try {
+        if (startAfter != null && continueToken != null) {
+          // If continuation token and start after both are provided, then we
+          // ignore start After
+          ozoneKeyIterator = bucket.listKeys(prefix, decodedToken.getLastKey());
+        } else if (startAfter != null && continueToken == null) {
+          ozoneKeyIterator = bucket.listKeys(prefix, startAfter);
+        } else if (startAfter == null && continueToken != null) {
+          ozoneKeyIterator = bucket.listKeys(prefix, decodedToken.getLastKey());
+        } else {
+          ozoneKeyIterator = bucket.listKeys(prefix);
+        }
+      } catch (OMException ex) {
+        if (ex.getResult() == ResultCodes.PERMISSION_DENIED) {
+          throw newError(S3ErrorTable.ACCESS_DENIED, bucketName, ex);
+        } else {
+          throw ex;
+        }
+      }
+
+      ListObjectResponse response = new ListObjectResponse();
+      response.setDelimiter(delimiter);
+      response.setName(bucketName);
+      response.setPrefix(prefix);
+      response.setMarker(marker == null ? "" : marker);
+      response.setMaxKeys(maxKeys);
+      response.setEncodingType(ENCODING_TYPE);
+      response.setTruncated(false);
+      response.setContinueToken(continueToken);
+
+      String prevDir = null;
+      if (continueToken != null) {
+        prevDir = decodedToken.getLastDir();
+      }
+      String lastKey = null;
+      int count = 0;
+      while (ozoneKeyIterator.hasNext()) {
+        OzoneKey next = ozoneKeyIterator.next();
+        String relativeKeyName = next.getName().substring(prefix.length());
+
+        int depth = StringUtils.countMatches(relativeKeyName, delimiter);
+        if (delimiter != null) {
+          if (depth > 0) {
+            // means key has multiple delimiters in its value.
+            // ex: dir/dir1/dir2, where delimiter is "/" and prefix is dir/
+            String dirName = relativeKeyName.substring(0, relativeKeyName
+                .indexOf(delimiter));
+            if (!dirName.equals(prevDir)) {
+              response.addPrefix(prefix + dirName + delimiter);
+              prevDir = dirName;
+              count++;
+            }
+          } else if (relativeKeyName.endsWith(delimiter)) {
+            // means or key is same as prefix with delimiter at end and ends
+            // with delimiter. ex: dir/, where prefix is dir and delimiter is /
+            response.addPrefix(relativeKeyName);
+            count++;
+          } else {
+            // means our key is matched with prefix if prefix is given and it
+            // does not have any common prefix.
+            addKey(response, next);
             count++;
           }
-        } else if (relativeKeyName.endsWith(delimiter)) {
-          // means or key is same as prefix with delimiter at end and ends with
-          // delimiter. ex: dir/, where prefix is dir and delimiter is /
-          response.addPrefix(relativeKeyName);
-          count++;
         } else {
-          // means our key is matched with prefix if prefix is given and it
-          // does not have any common prefix.
           addKey(response, next);
           count++;
         }
+
+        if (count == maxKeys) {
+          lastKey = next.getName();
+          break;
+        }
+      }
+
+      response.setKeyCount(count);
+
+      if (count < maxKeys) {
+        response.setTruncated(false);
+      } else if (ozoneKeyIterator.hasNext()) {
+        response.setTruncated(true);
+        ContinueToken nextToken = new ContinueToken(lastKey, prevDir);
+        response.setNextToken(nextToken.encodeToString());
+        // Set nextMarker to be lastKey. for the compatibility of aws api v1
+        response.setNextMarker(lastKey);
       } else {
-        addKey(response, next);
-        count++;
+        response.setTruncated(false);
       }
 
-      if (count == maxKeys) {
-        lastKey = next.getName();
-        break;
-      }
+      response.setKeyCount(
+          response.getCommonPrefixes().size() + response.getContents().size());
+      return Response.ok(response).build();
+    } catch (OS3Exception ex) {
+      throw ex;
+    } catch (IOException ex) {
+      throw S3ErrorTable.getInternalError(ex);
     }
-
-    response.setKeyCount(count);
-
-    if (count < maxKeys) {
-      response.setTruncated(false);
-    } else if (ozoneKeyIterator.hasNext()) {
-      response.setTruncated(true);
-      ContinueToken nextToken = new ContinueToken(lastKey, prevDir);
-      response.setNextToken(nextToken.encodeToString());
-      // Set nextMarker to be lastKey. for the compatibility of aws api v1
-      response.setNextMarker(lastKey);
-    } else {
-      response.setTruncated(false);
-    }
-
-    response.setKeyCount(
-        response.getCommonPrefixes().size() + response.getContents().size());
-    return Response.ok(response).build();
   }
 
   @PUT
   public Response put(@PathParam("bucket") String bucketName,
       @QueryParam("acl") String aclMarker,
       @Context HttpHeaders httpHeaders,
-      InputStream body) throws IOException, OS3Exception {
-    if (aclMarker != null) {
-      return putAcl(bucketName, httpHeaders, body);
-    }
+      InputStream body) throws OS3Exception {
     try {
+      if (aclMarker != null) {
+        return putAcl(bucketName, httpHeaders, body);
+      }
       String location = createS3Bucket(bucketName);
       LOG.info("Location is {}", location);
       return Response.status(HttpStatus.SC_OK).header("Location", location)
@@ -247,7 +253,11 @@ public class BucketEndpoint extends EndpointBase {
       }
       LOG.error("Error in Create Bucket Request for bucket: {}", bucketName,
           exception);
-      throw exception;
+      throw S3ErrorTable.getInternalError(exception);
+    } catch (OS3Exception ex) {
+      throw ex;
+    } catch (IOException ex) {
+      throw S3ErrorTable.getInternalError(ex);
     }
   }
 
@@ -289,9 +299,15 @@ public class BucketEndpoint extends EndpointBase {
    */
   @HEAD
   public Response head(@PathParam("bucket") String bucketName)
-      throws OS3Exception, IOException {
-    getBucket(bucketName);
-    return Response.ok().build();
+      throws OS3Exception {
+    try {
+      getBucket(bucketName);
+      return Response.ok().build();
+    } catch (OS3Exception ex) {
+      throw ex;
+    } catch (IOException ex) {
+      throw S3ErrorTable.getInternalError(ex);
+    }
   }
 
   /**
@@ -302,7 +318,7 @@ public class BucketEndpoint extends EndpointBase {
    */
   @DELETE
   public Response delete(@PathParam("bucket") String bucketName)
-      throws IOException, OS3Exception {
+      throws OS3Exception {
 
     try {
       deleteS3Bucket(bucketName);
@@ -314,8 +330,12 @@ public class BucketEndpoint extends EndpointBase {
       } else if (ex.getResult() == ResultCodes.PERMISSION_DENIED) {
         throw newError(S3ErrorTable.ACCESS_DENIED, bucketName, ex);
       } else {
-        throw ex;
+        throw S3ErrorTable.getInternalError(ex);
       }
+    } catch (OS3Exception ex) {
+      throw ex;
+    } catch (IOException ex) {
+      throw S3ErrorTable.getInternalError(ex);
     }
 
     return Response
@@ -334,37 +354,43 @@ public class BucketEndpoint extends EndpointBase {
   @Produces(MediaType.APPLICATION_XML)
   public MultiDeleteResponse multiDelete(@PathParam("bucket") String bucketName,
       @QueryParam("delete") String delete,
-      MultiDeleteRequest request) throws OS3Exception, IOException {
-    OzoneBucket bucket = getBucket(bucketName);
-    MultiDeleteResponse result = new MultiDeleteResponse();
-    if (request.getObjects() != null) {
-      for (DeleteObject keyToDelete : request.getObjects()) {
-        try {
-          bucket.deleteKey(keyToDelete.getKey());
+      MultiDeleteRequest request) throws OS3Exception {
+    try {
+      OzoneBucket bucket = getBucket(bucketName);
+      MultiDeleteResponse result = new MultiDeleteResponse();
+      if (request.getObjects() != null) {
+        for (DeleteObject keyToDelete : request.getObjects()) {
+          try {
+            bucket.deleteKey(keyToDelete.getKey());
 
-          if (!request.isQuiet()) {
-            result.addDeleted(new DeletedObject(keyToDelete.getKey()));
-          }
-        } catch (OMException ex) {
-          if (ex.getResult() == ResultCodes.PERMISSION_DENIED) {
-            result.addError(
-                new Error(keyToDelete.getKey(), "PermissionDenied",
-                    ex.getMessage()));
-          } else if (ex.getResult() != ResultCodes.KEY_NOT_FOUND) {
+            if (!request.isQuiet()) {
+              result.addDeleted(new DeletedObject(keyToDelete.getKey()));
+            }
+          } catch (OMException ex) {
+            if (ex.getResult() == ResultCodes.PERMISSION_DENIED) {
+              result.addError(
+                  new Error(keyToDelete.getKey(), "PermissionDenied",
+                      ex.getMessage()));
+            } else if (ex.getResult() != ResultCodes.KEY_NOT_FOUND) {
+              result.addError(
+                  new Error(keyToDelete.getKey(), "InternalError",
+                      ex.getMessage()));
+            } else if (!request.isQuiet()) {
+              result.addDeleted(new DeletedObject(keyToDelete.getKey()));
+            }
+          } catch (Exception ex) {
             result.addError(
                 new Error(keyToDelete.getKey(), "InternalError",
                     ex.getMessage()));
-          } else if (!request.isQuiet()) {
-            result.addDeleted(new DeletedObject(keyToDelete.getKey()));
           }
-        } catch (Exception ex) {
-          result.addError(
-              new Error(keyToDelete.getKey(), "InternalError",
-                  ex.getMessage()));
         }
       }
+      return result;
+    } catch (OS3Exception ex) {
+      throw ex;
+    } catch (IOException ex) {
+      throw S3ErrorTable.getInternalError(ex);
     }
-    return result;
   }
 
   /**

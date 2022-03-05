@@ -22,7 +22,6 @@ import javax.ws.rs.container.ContainerRequestContext;
 import javax.ws.rs.core.MultivaluedHashMap;
 import javax.ws.rs.core.MultivaluedMap;
 import javax.ws.rs.core.UriInfo;
-import java.io.IOException;
 import java.net.URI;
 import java.util.Arrays;
 import java.util.Collection;
@@ -135,7 +134,7 @@ public class TestOzoneClientProducer {
       producer.createClient();
       fail("testGetClientFailure");
     } catch (Exception ex) {
-      Assert.assertTrue(ex instanceof IOException);
+      Assert.assertTrue(ex instanceof WebApplicationException);
     }
   }
 
@@ -178,7 +177,7 @@ public class TestOzoneClientProducer {
       producer.createClient();
       fail("testGetClientFailureWithMultipleServiceIds");
     } catch (Exception ex) {
-      Assert.assertTrue(ex instanceof IOException);
+      Assert.assertTrue(ex instanceof WebApplicationException);
       Assert.assertTrue(ex.getMessage().contains(
           "More than 1 OzoneManager ServiceID"));
     }
@@ -194,7 +193,7 @@ public class TestOzoneClientProducer {
       producer.createClient();
       fail("testGetClientFailureWithMultipleServiceIdsAndInternalServiceId");
     } catch (Exception ex) {
-      Assert.assertTrue(ex instanceof IOException);
+      Assert.assertTrue(ex instanceof WebApplicationException);
       // Still test will fail, as config is not complete. But it should pass
       // the service id check.
       Assert.assertFalse(ex.getMessage().contains(
