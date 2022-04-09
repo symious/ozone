@@ -267,8 +267,7 @@ public final class OzoneManager extends ServiceRuntimeInfoImpl
   public static final Logger LOG =
       LoggerFactory.getLogger(OzoneManager.class);
 
-  private static final AuditLogger AUDIT = new AuditLogger(
-      AuditLoggerType.OMLOGGER);
+  private static final AuditLogger AUDIT = AuditLogger.instance();
 
   private static final String OM_DAEMON = "om";
 
@@ -398,6 +397,7 @@ public final class OzoneManager extends ServiceRuntimeInfoImpl
   private OzoneManager(OzoneConfiguration conf, StartupOption startupOption)
       throws IOException, AuthenticationException {
     super(OzoneVersionInfo.OZONE_VERSION_INFO);
+    AUDIT.initializeLogger(AuditLoggerType.OMLOGGER);
     Preconditions.checkNotNull(conf);
     setConfiguration(conf);
     // Load HA related configurations

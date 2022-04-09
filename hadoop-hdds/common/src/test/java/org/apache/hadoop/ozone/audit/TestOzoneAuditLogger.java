@@ -18,7 +18,11 @@
 package org.apache.hadoop.ozone.audit;
 
 import org.apache.commons.io.FileUtils;
+import org.apache.hadoop.hdds.conf.OzoneConfiguration;
+import org.junit.After;
 import org.junit.AfterClass;
+import org.junit.Before;
+import org.junit.BeforeClass;
 import org.junit.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -26,7 +30,9 @@ import org.slf4j.LoggerFactory;
 import java.io.File;
 import java.io.IOException;
 import java.util.Arrays;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.stream.Collectors;
 
@@ -54,8 +60,7 @@ public class TestOzoneAuditLogger {
         "org.apache.logging.log4j.core.async.AsyncLoggerContextSelector");
   }
 
-  private static final AuditLogger AUDIT =
-      new AuditLogger(AuditLoggerType.OMLOGGER);
+  private static final AuditLogger AUDIT = AuditLogger.instance();
 
   private static final Map<String, String> PARAMS =
       new DummyEntity().toAuditMap();
@@ -99,6 +104,11 @@ public class TestOzoneAuditLogger {
           .withResult(SUCCESS)
           .withException(null).build();
 
+  @BeforeClass
+  public static void init() {
+    AUDIT.initializeLogger(AuditLoggerType.OMLOGGER);
+  }
+
   @AfterClass
   public static void tearDown() {
     File file = new File("audit.log");
@@ -108,6 +118,11 @@ public class TestOzoneAuditLogger {
     } else {
       LOG.info("audit.log could not be deleted.");
     }
+  }
+
+  @After
+  public void reset() {
+    AUDIT.refreshDebugCmdSet();
   }
 
   /**
@@ -152,6 +167,19 @@ public class TestOzoneAuditLogger {
     verifyNoLog();
   }
 
+  /**
+   * Test to verify no WRITE event is logged.
+   */
+  @Test
+  public void notLogWriteEvents() throws IOException {
+    OzoneConfiguration conf = new OzoneConfiguration();
+    conf.set(AuditLogger.AUDIT_LOG_DEBUG_CMD_PREFIX +
+            AuditLoggerType.OMLOGGER.getType().toLowerCase(Locale.ROOT),
+        "CREATE_VOLUME");
+    AUDIT.refreshDebugCmdSet(conf);
+    AUDIT.logWriteSuccess(WRITE_SUCCESS_MSG);
+    verifyNoLog();
+  }
   /**
    * Test to verify if multiline entries can be checked.
    */
