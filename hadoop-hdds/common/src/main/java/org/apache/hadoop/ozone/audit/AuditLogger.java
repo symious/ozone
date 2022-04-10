@@ -19,11 +19,14 @@ package org.apache.hadoop.ozone.audit;
 
 import com.google.common.annotations.VisibleForTesting;
 import org.apache.hadoop.hdds.conf.OzoneConfiguration;
+import org.apache.hadoop.ozone.OzoneSecurityUtil;
 import org.apache.hadoop.util.StringUtils;
 import org.apache.logging.log4j.Level;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Marker;
 import org.apache.logging.log4j.spi.ExtendedLogger;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.Collection;
 import java.util.HashSet;
@@ -38,14 +41,15 @@ import java.util.stream.Collectors;
  */
 public class AuditLogger {
 
+  private static final Logger LOG = LoggerFactory.getLogger(AuditLogger.class);
   private ExtendedLogger logger;
   private static final String FQCN = AuditLogger.class.getName();
   private static final Marker WRITE_MARKER = AuditMarker.WRITE.getMarker();
   private static final Marker READ_MARKER = AuditMarker.READ.getMarker();
   private AtomicReference<Set<String>> debugCmdSetRef =
       new AtomicReference<>(new HashSet<>());
-  public static String AUDIT_LOG_DEBUG_CMD_PREFIX =
-      "ozone.audit.log.debug.cmd.";
+  public static String AUDIT_LOG_DEBUG_CMD_LIST_PREFIX =
+      "ozone.audit.log.debug.cmd.list.";
   private AuditLoggerType type;
 
   /**
@@ -70,9 +74,9 @@ public class AuditLogger {
   }
 
   public void logWriteSuccess(AuditMessage msg) {
-    System.out.println("YYYY333" + debugCmdSetRef.get());
-    System.out.println("YYYY444" + msg.getOp());
-    if (!debugCmdSetRef.get().contains(msg.getOp().toLowerCase(Locale.ROOT))) {
+    if (debugCmdSetRef.get().contains(msg.getOp().toLowerCase(Locale.ROOT))) {
+      this.logger.logIfEnabled(FQCN, Level.DEBUG, WRITE_MARKER, msg, null);
+    } else {
       this.logger.logIfEnabled(FQCN, Level.INFO, WRITE_MARKER, msg, null);
     }
   }
@@ -83,7 +87,9 @@ public class AuditLogger {
   }
 
   public void logReadSuccess(AuditMessage msg) {
-    if (!debugCmdSetRef.get().contains(msg.getOp().toLowerCase(Locale.ROOT))) {
+    if (debugCmdSetRef.get().contains(msg.getOp().toLowerCase(Locale.ROOT))) {
+      this.logger.logIfEnabled(FQCN, Level.DEBUG, READ_MARKER, msg, null);
+    } else {
       this.logger.logIfEnabled(FQCN, Level.INFO, READ_MARKER, msg, null);
     }
   }
@@ -97,6 +103,9 @@ public class AuditLogger {
     if (auditMessage.getThrowable() == null) {
       if (debugCmdSetRef.get().contains(
           auditMessage.getOp().toLowerCase(Locale.ROOT))) {
+        this.logger.logIfEnabled(FQCN, Level.DEBUG, WRITE_MARKER, auditMessage,
+            auditMessage.getThrowable());
+      } else {
         this.logger.logIfEnabled(FQCN, Level.INFO, WRITE_MARKER, auditMessage,
             auditMessage.getThrowable());
       }
@@ -111,9 +120,10 @@ public class AuditLogger {
     refreshDebugCmdSet(conf);
   }
 
-  public synchronized void refreshDebugCmdSet(OzoneConfiguration conf) {
+  public void refreshDebugCmdSet(OzoneConfiguration conf) {
     Collection<String> cmds = conf.getTrimmedStringCollection(
-        AUDIT_LOG_DEBUG_CMD_PREFIX + type.getType().toLowerCase(Locale.ROOT));
+        AUDIT_LOG_DEBUG_CMD_LIST_PREFIX + type.getType().toLowerCase(Locale.ROOT));
+    LOG.info("{} Refresh DebugCmdSet for {} to {}", this, type.getType(), cmds);
     debugCmdSetRef = new AtomicReference<>(
           cmds.stream().map(String::toLowerCase).collect(Collectors.toSet()));
   }
