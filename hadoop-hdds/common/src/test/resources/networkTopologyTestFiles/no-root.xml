@@ -19,8 +19,13 @@
 <configuration>
   <layoutversion>1</layoutversion>
   <layers>
-    <layer id="datacenter">
+    <layer id="">
       <prefix></prefix>
+      <cost>1</cost>
+      <type>InnerNode</type>
+    </layer>
+    <layer id="datacenter">
+      <prefix>dc</prefix>
       <cost>1</cost>
       <type>InnerNode</type>
     </layer>

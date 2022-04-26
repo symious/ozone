@@ -19,10 +19,15 @@
 <configuration>
   <layoutversion>1</layoutversion>
   <layers>
-    <layer id="datacenter">
+    <layer id="">
       <prefix></prefix>
       <cost>1</cost>
       <type>ROOT</type>
+    </layer>
+    <layer id="datacenter">
+      <prefix>dc</prefix>
+      <cost>1</cost>
+      <type>InnerNode</type>
     </layer>
     <layer id="rack">
       <prefix>rack</prefix>
@@ -37,7 +42,7 @@
     </layer>
   </layers>
   <topology>
-    <path>/rack/datacenter/node</path>
+    <path>rack//datacenter/node</path>
     <enforceprefix>false</enforceprefix>
   </topology>
 </configuration>

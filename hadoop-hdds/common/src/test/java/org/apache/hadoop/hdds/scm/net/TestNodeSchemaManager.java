@@ -20,6 +20,7 @@ package org.apache.hadoop.hdds.scm.net;
 import org.apache.hadoop.hdds.conf.OzoneConfiguration;
 import org.apache.hadoop.hdds.scm.ScmConfigKeys;
 
+import static org.apache.hadoop.hdds.scm.net.NetConstants.DEFAULT_DATACENTER;
 import static org.apache.hadoop.hdds.scm.net.NetConstants.DEFAULT_NODEGROUP;
 import static org.apache.hadoop.hdds.scm.net.NetConstants.DEFAULT_RACK;
 import static org.junit.Assert.assertEquals;
@@ -64,7 +65,7 @@ public class TestNodeSchemaManager {
 
   @Test
   public void testPass() {
-    assertEquals(4, manager.getMaxLevel());
+    assertEquals(5, manager.getMaxLevel());
     for (int i  = 1; i <= manager.getMaxLevel(); i++) {
       assertTrue(manager.getCost(i) == 1 || manager.getCost(i) == 0);
     }
@@ -88,14 +89,14 @@ public class TestNodeSchemaManager {
   public void testComplete() {
     // successful complete action
     String path = "/node1";
-    assertEquals(DEFAULT_RACK + DEFAULT_NODEGROUP + path,
+    assertEquals(DEFAULT_DATACENTER + DEFAULT_RACK + DEFAULT_NODEGROUP + path,
         manager.complete(path));
-    assertEquals("/rack" + DEFAULT_NODEGROUP + path,
+    assertEquals(DEFAULT_DATACENTER + "/rack" + DEFAULT_NODEGROUP + path,
         manager.complete("/rack" + path));
-    assertEquals(DEFAULT_RACK + "/nodegroup" + path,
+    assertEquals(DEFAULT_DATACENTER + DEFAULT_RACK + "/nodegroup" + path,
         manager.complete("/nodegroup" + path));
 
     // failed complete action
-    assertEquals(null, manager.complete("/dc" + path));
+    assertEquals(null, manager.complete("/a" + path));
   }
 }

@@ -19,10 +19,16 @@
 <configuration>
   <layoutversion>1</layoutversion>
   <layers>
-    <layer id="datacenter">
+    <layer id="">
       <prefix></prefix>
       <cost>1</cost>
-      <type>Root</type>
+      <type>ROOT</type>
+    </layer>
+    <layer id="datacenter">
+      <prefix>dc</prefix>
+      <cost>1</cost>
+      <type>InnerNode</type>
+      <default>/default-datacenter</default>
     </layer>
     <layer id="rack">
       <prefix>rack</prefix>

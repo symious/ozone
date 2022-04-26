@@ -44,6 +44,8 @@ import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 import static org.junit.Assume.assumeTrue;
+
+import org.junit.Assert;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.Timeout;
@@ -227,7 +229,7 @@ public class TestNetworkTopologyImpl {
           "./networkTopologyTestFiles/good.xml").getPath();
       conf.set(ScmConfigKeys.OZONE_SCM_NETWORK_TOPOLOGY_SCHEMA_FILE, filePath);
       NetworkTopology newCluster = new NetworkTopologyImpl(conf);
-      LOG.info("network topology max level = {}", newCluster.getMaxLevel());
+      Assert.assertEquals(5, newCluster.getMaxLevel());
     } catch (Throwable e) {
       fail("should succeed");
     }

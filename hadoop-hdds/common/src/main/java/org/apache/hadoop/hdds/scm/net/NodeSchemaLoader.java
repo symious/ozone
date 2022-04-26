@@ -385,9 +385,6 @@ public final class NodeSchemaLoader {
               + "> is null");
         }
         if (TOPOLOGY_PATH.equals(tagName)) {
-          if (value.startsWith(NetConstants.PATH_SEPARATOR_STR)) {
-            value = value.substring(1);
-          }
           String[] layerIDs = value.split(NetConstants.PATH_SEPARATOR_STR);
           if (layerIDs.length != schemas.size()) {
             throw new IllegalArgumentException("Topology path depth doesn't "
