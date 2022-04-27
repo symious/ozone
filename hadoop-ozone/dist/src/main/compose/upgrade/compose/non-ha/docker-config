@@ -39,4 +39,6 @@ OZONE-SITE.XML_hdds.scmclient.max.retry.timeout=30s
 OZONE_CONF_DIR=/etc/hadoop
 OZONE_LOG_DIR=/var/log/hadoop
 
+OZONE-SITE.XML_ozone.scm.network.topology.schema.file=network-topology-default.yaml
+
 no_proxy=om,scm,s3g,kdc,localhost,127.0.0.1
