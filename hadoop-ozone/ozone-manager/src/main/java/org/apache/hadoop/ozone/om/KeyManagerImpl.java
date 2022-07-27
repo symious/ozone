@@ -92,6 +92,7 @@ import org.apache.hadoop.hdds.security.token.OzoneBlockTokenSecretManager;
 import org.apache.hadoop.ozone.security.acl.IAccessAuthorizer;
 import org.apache.hadoop.ozone.security.acl.OzoneObj;
 import org.apache.hadoop.ozone.security.acl.RequestContext;
+import org.apache.hadoop.ozone.util.PathUtils;
 import org.apache.hadoop.security.SecurityUtil;
 import org.apache.hadoop.security.UserGroupInformation;
 import org.apache.hadoop.util.Time;
@@ -830,7 +831,7 @@ public class KeyManagerImpl implements KeyManager {
       String keyName, String uploadID) throws IOException {
     OMMetadataManager metaMgr = ozoneManager.getMetadataManager();
     String fileName = OzoneFSUtils.getFileName(keyName);
-    Iterator<Path> pathComponents = Paths.get(keyName).iterator();
+    Iterator<String> pathComponents = PathUtils.iterator(fileName);
     final long volumeId = metaMgr.getVolumeId(volumeName);
     final long bucketId = metaMgr.getBucketId(volumeName, bucketName);
     long parentID =

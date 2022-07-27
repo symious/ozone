@@ -45,6 +45,7 @@ import org.apache.hadoop.ozone.protocol.proto.OzoneManagerProtocolProtos.KeyArgs
 import org.apache.hadoop.ozone.protocol.proto.OzoneManagerProtocolProtos.OMRequest;
 import org.apache.hadoop.ozone.protocol.proto.OzoneManagerProtocolProtos.OMResponse;
 import org.apache.hadoop.ozone.security.acl.IAccessAuthorizer;
+import org.apache.hadoop.ozone.util.PathUtils;
 import org.jetbrains.annotations.NotNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -210,7 +211,7 @@ public class OMAllocateBlockRequestWithFSO extends OMAllocateBlockRequest {
     final long bucketId = omMetadataManager.getBucketId(
             volumeName, bucketName);
     String fileName = OzoneFSUtils.getFileName(keyName);
-    Iterator<Path> pathComponents = Paths.get(keyName).iterator();
+    Iterator<String> pathComponents = PathUtils.iterator(keyName);
     long parentID = OMFileRequest.getParentID(volumeId, bucketId,
             pathComponents, keyName, omMetadataManager);
     return omMetadataManager.getOpenFileName(volumeId, bucketId, parentID,

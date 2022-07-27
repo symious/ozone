@@ -27,6 +27,7 @@ import org.apache.hadoop.ozone.om.helpers.OzoneFileStatus;
 import org.apache.hadoop.ozone.om.request.OMRequestTestUtils;
 import org.apache.hadoop.ozone.om.request.file.OMFileRequest;
 import org.apache.hadoop.ozone.protocol.proto.OzoneManagerProtocolProtos.OMRequest;
+import org.apache.hadoop.ozone.util.PathUtils;
 import org.apache.hadoop.util.Time;
 import org.junit.Assert;
 
@@ -101,8 +102,7 @@ public class TestS3MultipartUploadCompleteRequestWithFSO
 
   private long getParentID(String volumeName, String bucketName,
                            String keyName) throws IOException {
-    Path keyPath = Paths.get(keyName);
-    Iterator<Path> elements = keyPath.iterator();
+    Iterator<String> elements = PathUtils.iterator(keyName);
     final long volumeId = omMetadataManager.getVolumeId(volumeName);
     final long bucketId = omMetadataManager.getBucketId(volumeName,
             bucketName);

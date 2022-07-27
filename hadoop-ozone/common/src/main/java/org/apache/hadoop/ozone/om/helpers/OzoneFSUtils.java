@@ -18,6 +18,7 @@
 package org.apache.hadoop.ozone.om.helpers;
 
 import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.ozone.util.PathUtils;
 import org.apache.hadoop.util.StringUtils;
 
 import javax.annotation.Nonnull;
@@ -142,9 +143,9 @@ public final class OzoneFSUtils {
    * name 'file1'.
    */
   public static String getFileName(@Nonnull String keyName) {
-    java.nio.file.Path fileName = Paths.get(keyName).getFileName();
+    String fileName = PathUtils.getFileName(keyName);
     if (fileName != null) {
-      return fileName.toString();
+      return fileName;
     }
     // failed to converts a path key
     return keyName;

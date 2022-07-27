@@ -43,6 +43,7 @@ import org.apache.hadoop.ozone.recon.api.types.ResponseStatus;
 import org.apache.hadoop.ozone.recon.api.types.QuotaUsageResponse;
 import org.apache.hadoop.ozone.recon.recovery.ReconOMMetadataManager;
 import org.apache.hadoop.ozone.recon.spi.ReconNamespaceSummaryManager;
+import org.apache.hadoop.ozone.util.PathUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -1018,13 +1019,12 @@ public class NSSummaryEndpoint {
                                       long bucketObjectId)
       throws IOException {
 
-    java.nio.file.Path keyPath = Paths.get(keyName);
-    Iterator<java.nio.file.Path> elements = keyPath.iterator();
+    Iterator<String> elements = PathUtils.iterator(keyName);
 
     long lastKnownParentId = bucketObjectId;
     OmDirectoryInfo omDirInfo = null;
     while (elements.hasNext()) {
-      String fileName = elements.next().toString();
+      String fileName = elements.next();
 
       // For example, /vol1/buck1/a/b/c/d/e/file1.txt
       // 1. Do lookup path component on directoryTable starting from bucket

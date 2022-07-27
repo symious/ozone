@@ -30,6 +30,7 @@ import org.apache.hadoop.ozone.om.response.s3.multipart.S3MultipartUploadAbortRe
 import org.apache.hadoop.ozone.protocol.proto.OzoneManagerProtocolProtos.MultipartUploadAbortResponse;
 import org.apache.hadoop.ozone.protocol.proto.OzoneManagerProtocolProtos.OMRequest;
 import org.apache.hadoop.ozone.protocol.proto.OzoneManagerProtocolProtos.OMResponse;
+import org.apache.hadoop.ozone.util.PathUtils;
 
 import java.io.IOException;
 import java.nio.file.Path;
@@ -75,7 +76,7 @@ public class S3MultipartUploadAbortRequestWithFSO
       OMMetadataManager omMetadataManager) throws IOException {
 
     String fileName = OzoneFSUtils.getFileName(keyName);
-    Iterator<Path> pathComponents = Paths.get(keyName).iterator();
+    Iterator<String> pathComponents = PathUtils.iterator(keyName);
     final long volumeId = omMetadataManager.getVolumeId(volumeName);
     final long bucketId = omMetadataManager.getBucketId(volumeName,
             bucketName);

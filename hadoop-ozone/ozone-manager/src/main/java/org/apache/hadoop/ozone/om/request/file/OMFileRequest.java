@@ -49,6 +49,7 @@ import org.apache.hadoop.ozone.om.helpers.OzoneFSUtils;
 import org.apache.hadoop.ozone.om.helpers.OzoneFileStatus;
 import org.apache.hadoop.ozone.om.helpers.BucketLayout;
 import org.apache.hadoop.ozone.om.helpers.RepeatedOmKeyInfo;
+import org.apache.hadoop.ozone.util.PathUtils;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.slf4j.Logger;
@@ -965,7 +966,7 @@ public final class OMFileRequest {
    * @throws IOException DB failure or parent not exists in DirectoryTable
    */
   public static long getParentID(long volumeId, long bucketId,
-                                 Iterator<Path> pathComponents,
+                                 Iterator<String> pathComponents,
                                  String keyName,
                                  OMMetadataManager omMetadataManager)
       throws IOException {
@@ -985,7 +986,7 @@ public final class OMFileRequest {
    * @throws IOException DB failure or parent not exists in DirectoryTable
    */
   public static long getParentID(long volumeId, long bucketId,
-      Iterator<Path> pathComponents, String keyName,
+      Iterator<String> pathComponents, String keyName,
       OMMetadataManager omMetadataManager, String errMsg)
       throws IOException {
 
@@ -1000,7 +1001,7 @@ public final class OMFileRequest {
     }
     OmDirectoryInfo omDirectoryInfo;
     while (pathComponents.hasNext()) {
-      String nodeName = pathComponents.next().toString();
+      String nodeName = pathComponents.next();
       boolean reachedLastPathComponent = !pathComponents.hasNext();
       String dbNodeName =
               omMetadataManager.getOzonePathKey(volumeId, bucketId,
@@ -1049,7 +1050,7 @@ public final class OMFileRequest {
     final long volumeId = omMetadataManager.getVolumeId(volumeName);
     final long bucketId = omMetadataManager.getBucketId(volumeName,
             bucketName);
-    Iterator<Path> pathComponents = Paths.get(keyName).iterator();
+    Iterator<String> pathComponents = PathUtils.iterator(keyName);
     return OMFileRequest.getParentID(volumeId, bucketId,
             pathComponents, keyName, omMetadataManager);
   }

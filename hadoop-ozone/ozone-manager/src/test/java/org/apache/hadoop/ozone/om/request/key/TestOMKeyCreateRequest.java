@@ -19,6 +19,7 @@
 package org.apache.hadoop.ozone.om.request.key;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.List;
@@ -654,5 +655,18 @@ public class TestOMKeyCreateRequest extends TestOMKeyRequest {
 
   protected OMKeyCreateRequest getOMKeyCreateRequest(OMRequest omRequest) {
     return new OMKeyCreateRequest(omRequest, BucketLayout.DEFAULT);
+  }
+
+  @Test
+  public void testKeyNameWithMalformedCharacter() throws Exception {
+
+    byte[] b = {(byte) 1};
+    keyName = new String(b, StandardCharsets.US_ASCII);
+
+    // Add volume and bucket entries to DB.
+    addVolumeAndBucketToDB(volumeName, bucketName,
+        omMetadataManager);
+
+    createAndCheck(keyName);
   }
 }

@@ -41,6 +41,7 @@ import org.apache.hadoop.ozone.protocol.proto.OzoneManagerProtocolProtos.KeyLoca
 import org.apache.hadoop.ozone.protocol.proto.OzoneManagerProtocolProtos.OMRequest;
 import org.apache.hadoop.ozone.protocol.proto.OzoneManagerProtocolProtos.OMResponse;
 import org.apache.hadoop.ozone.security.acl.IAccessAuthorizer;
+import org.apache.hadoop.ozone.util.PathUtils;
 
 import java.io.IOException;
 import java.nio.file.Path;
@@ -106,7 +107,7 @@ public class OMKeyCommitRequestWithFSO extends OMKeyCommitRequest {
               commitKeyRequest.getClientID());
 
 
-      Iterator<Path> pathComponents = Paths.get(keyName).iterator();
+      Iterator<String> pathComponents = PathUtils.iterator(keyName);
       String dbOpenFileKey = null;
 
       List<OmKeyLocationInfo> locationInfoList = new ArrayList<>();
