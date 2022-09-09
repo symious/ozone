@@ -57,7 +57,6 @@ import org.apache.hadoop.ozone.container.common.volume.StorageVolumeChecker;
 import org.apache.hadoop.ozone.container.diskbalancer.DiskBalancerInfo;
 import org.apache.hadoop.ozone.container.diskbalancer.DiskBalancerService;
 import org.apache.hadoop.ozone.container.keyvalue.statemachine.background.BlockDeletingService;
-import org.apache.hadoop.ozone.container.diskbalancer.DiskBalancerRefreshService;
 import org.apache.hadoop.ozone.container.keyvalue.statemachine.background.StaleRecoveringContainerScrubbingService;
 import org.apache.hadoop.ozone.container.replication.ReplicationServer;
 import org.apache.hadoop.ozone.container.replication.ReplicationServer.ReplicationConfig;
@@ -114,7 +113,6 @@ public class OzoneContainer {
   private List<ContainerDataScanner> dataScanners;
   private final BlockDeletingService blockDeletingService;
   private final DiskBalancerService diskBalancerService;
-  private final DiskBalancerRefreshService diskBalancerRefreshService;
   private final StaleRecoveringContainerScrubbingService
       recoveringContainerScrubbingService;
   private final GrpcTlsConfig tlsClientConfig;
@@ -228,16 +226,13 @@ public class OzoneContainer {
             blockDeletingServiceTimeout, TimeUnit.MILLISECONDS,
             blockDeletingServiceWorkerSize, config);
 
-    diskBalancerService = new DiskBalancerService(this, config);
-
-    Duration diskBalancerRefreshSvcInterval = conf.getObject(
-        DatanodeConfiguration.class).getDiskBalancerRefreshInterval();
-    Duration diskBalancerRefreshSvcTimeout = conf.getObject(
-        DatanodeConfiguration.class).getDiskBalancerRefreshTimeout();
-    diskBalancerRefreshService =
-        new DiskBalancerRefreshService(this, diskBalancerService,
-            diskBalancerRefreshSvcInterval.toMillis(),
-            diskBalancerRefreshSvcTimeout.toMillis(), TimeUnit.MILLISECONDS, 1,
+    Duration diskBalancerSvcInterval = conf.getObject(
+        DatanodeConfiguration.class).getDiskBalancerInterval();
+    Duration diskBalancerSvcTimeout = conf.getObject(
+        DatanodeConfiguration.class).getDiskBalancerTimeout();
+    diskBalancerService =
+        new DiskBalancerService(this, diskBalancerSvcInterval.toMillis(),
+            diskBalancerSvcTimeout.toMillis(), TimeUnit.MILLISECONDS, 1,
             config);
 
     Duration recoveringContainerScrubbingSvcInterval = conf.getObject(

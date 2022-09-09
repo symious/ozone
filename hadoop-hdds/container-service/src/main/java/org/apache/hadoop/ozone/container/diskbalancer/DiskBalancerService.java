@@ -25,6 +25,8 @@ import org.apache.hadoop.hdds.protocol.DatanodeDetails;
 import org.apache.hadoop.hdds.protocol.proto.StorageContainerDatanodeProtocolProtos.DiskBalancerReportProto;
 import org.apache.hadoop.hdds.scm.storage.DiskBalancerConfiguration;
 import org.apache.hadoop.hdds.server.ServerUtils;
+import org.apache.hadoop.hdds.utils.BackgroundService;
+import org.apache.hadoop.hdds.utils.BackgroundTaskQueue;
 import org.apache.hadoop.ozone.OzoneConsts;
 import org.apache.hadoop.ozone.container.common.statemachine.DatanodeConfiguration;
 import org.apache.hadoop.ozone.container.ozoneimpl.OzoneContainer;
@@ -33,12 +35,11 @@ import org.slf4j.LoggerFactory;
 
 import java.io.File;
 import java.io.IOException;
-import java.util.concurrent.LinkedBlockingQueue;
-import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 
 
-public class DiskBalancerService {
+public class DiskBalancerService extends BackgroundService {
 
   private static final Logger LOG =
       LoggerFactory.getLogger(DiskBalancerService.class);
@@ -53,10 +54,11 @@ public class DiskBalancerService {
 
   private final File diskBalancerInfoFile;
 
-  private ThreadPoolExecutor threadPoolExecutor;
-
   public DiskBalancerService(OzoneContainer ozoneContainer,
-      ConfigurationSource conf) throws IOException {
+      long serviceCheckInterval, long serviceCheckTimeout, TimeUnit timeUnit,
+      int workerSize, ConfigurationSource conf) throws IOException {
+    super("DiskBalancerService", serviceCheckInterval, timeUnit, workerSize,
+        serviceCheckTimeout);
     this.ozoneContainer = ozoneContainer;
     this.conf = conf;
 
@@ -65,9 +67,6 @@ public class DiskBalancerService {
     diskBalancerInfoFile = new File(diskBalancerInfoPath);
 
     loadDiskBalancerInfo();
-
-    threadPoolExecutor = new ThreadPoolExecutor(parallelThread, parallelThread,
-        0L, TimeUnit.MILLISECONDS, new LinkedBlockingQueue<>());
   }
 
   /**
@@ -77,9 +76,6 @@ public class DiskBalancerService {
    */
   public void refresh(DiskBalancerInfo diskBalancerInfo) throws IOException {
     applyDiskBalancerInfo(diskBalancerInfo);
-
-    threadPoolExecutor.setCorePoolSize(parallelThread);
-    threadPoolExecutor.setMaximumPoolSize(parallelThread);
   }
 
   /**
@@ -116,6 +112,13 @@ public class DiskBalancerService {
     setThreshold(diskBalancerInfo.getThreshold());
     setBandwidthInMB(diskBalancerInfo.getBandwidthInMB());
     setParallelThread(diskBalancerInfo.getParallelThread());
+
+    // Default executorService is ScheduledThreadPoolExecutor, so we can
+    // update the poll size by setting corePoolSize.
+    if ((getExecutorService() instanceof ScheduledThreadPoolExecutor)) {
+      ((ScheduledThreadPoolExecutor) getExecutorService())
+          .setCorePoolSize(parallelThread);
+    }
   }
 
   private String getDiskBalancerInfoPath(ConfigurationSource conf) {
@@ -203,6 +206,11 @@ public class DiskBalancerService {
   }
 
   public DiskBalancerReportProto getDiskBalancerReportProto() {
+    return null;
+  }
+
+  @Override
+  public BackgroundTaskQueue getTasks() {
     return null;
   }
 }

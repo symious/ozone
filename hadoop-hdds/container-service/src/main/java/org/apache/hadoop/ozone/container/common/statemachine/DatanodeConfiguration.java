@@ -317,42 +317,40 @@ public class DatanodeConfiguration {
     this.diskBalancerShouldRun = shouldRun;
   }
 
-  @Config(key = "disk.balancer.refresh.service.interval",
+  @Config(key = "disk.balancer.service.interval",
       defaultValue = "60s",
       type = ConfigType.TIME,
       tags = { DATANODE, ConfigTag.DISKBALANCER},
-      description =
-          "Refresh Time interval of the Datanode DiskBalancer service. " +
+      description = "Time interval of the Datanode DiskBalancer service. " +
               "The Datanode will check the service periodically and update " +
               "the config and running status for DiskBalancer service. " +
               "Unit could be defined with postfix (ns,ms,s,m,h,d). "
   )
-  private long diskBalancerRefreshInterval = Duration.ofSeconds(60).toMillis();
+  private long diskBalancerInterval = Duration.ofSeconds(60).toMillis();
 
-  public Duration getDiskBalancerRefreshInterval() {
-    return Duration.ofMillis(diskBalancerRefreshInterval);
+  public Duration getDiskBalancerInterval() {
+    return Duration.ofMillis(diskBalancerInterval);
   }
 
-  public void setDiskBalancerRefreshInterval(Duration duration) {
-    this.diskBalancerRefreshInterval = duration.toMillis();
+  public void setDiskBalancerInterval(Duration duration) {
+    this.diskBalancerInterval = duration.toMillis();
   }
 
-  @Config(key = "disk.balancer.refresh.service.timeout",
+  @Config(key = "disk.balancer.service.timeout",
       defaultValue = "300s",
       type = ConfigType.TIME,
       tags = { DATANODE, ConfigTag.DISKBALANCER},
-      description =
-          "Timeout for refreshing of the Datanode DiskBalancer service. "
+      description = "Timeout for the Datanode DiskBalancer service. "
               + "Unit could be defined with postfix (ns,ms,s,m,h,d). "
   )
-  private long diskBalancerRefreshTimeout = Duration.ofSeconds(300).toMillis();
+  private long diskBalancerTimeout = Duration.ofSeconds(300).toMillis();
 
-  public Duration getDiskBalancerRefreshTimeout() {
-    return Duration.ofMillis(diskBalancerRefreshTimeout);
+  public Duration getDiskBalancerTimeout() {
+    return Duration.ofMillis(diskBalancerTimeout);
   }
 
-  public void setDiskBalancerRefreshTimeout(Duration duration) {
-    this.diskBalancerRefreshTimeout = duration.toMillis();
+  public void setDiskBalancerTimeout(Duration duration) {
+    this.diskBalancerTimeout = duration.toMillis();
   }
 
   @PostConstruct
