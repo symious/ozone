@@ -23,6 +23,8 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
 import java.time.Instant;
 import java.util.Collections;
@@ -71,6 +73,9 @@ import static org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.Res
 import static org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.Result.INVALID_CONTAINER_STATE;
 import static org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.Result.UNSUPPORTED_REQUEST;
 import static org.apache.hadoop.ozone.container.common.utils.StorageVolumeUtil.onFailure;
+import static org.apache.hadoop.ozone.container.keyvalue.KeyValueContainerData.CHUNK_DIR_NAME;
+import static org.apache.hadoop.ozone.container.keyvalue.KeyValueContainerData.CONTAINER_FILE_NAME;
+import static org.apache.hadoop.ozone.container.keyvalue.KeyValueContainerData.DB_DIR_NAME;
 
 import org.apache.hadoop.util.StringUtils;
 import org.slf4j.Logger;
@@ -617,6 +622,55 @@ public class KeyValueContainer implements Container<KeyValueContainerData> {
     }
   }
 
+  @Override
+  public void copyContainerData(Path destination) throws IOException {
+    writeLock();
+    try {
+      // Closed/ Quasi closed containers are considered for replication by
+      // replication manager if they are under-replicated.
+      ContainerProtos.ContainerDataProto.State state =
+          getContainerData().getState();
+      if (!(state == ContainerProtos.ContainerDataProto.State.CLOSED ||
+          state == ContainerDataProto.State.QUASI_CLOSED)) {
+        throw new IllegalStateException(
+            "Only (quasi)closed containers can be exported, but " +
+                "ContainerId=" + getContainerData().getContainerID() +
+                " is in state " + state);
+      }
+
+      try {
+        if (!containerData.getSchemaVersion().equals(OzoneConsts.SCHEMA_V3)) {
+          compactDB();
+          // Close DB (and remove from cache) to avoid concurrent modification
+          // while packing it.
+          BlockUtils.removeDB(containerData, config);
+        }
+      } finally {
+        readLock();
+        writeUnlock();
+      }
+
+      if (containerData.getSchemaVersion().equals(OzoneConsts.SCHEMA_V3)) {
+        // Synchronize the dump and copy operation,
+        // so concurrent copy don't get dump files overwritten.
+        // We seldom got concurrent exports for a container,
+        // so it should not influence performance much.
+        synchronized (dumpLock) {
+          BlockUtils.dumpKVContainerDataToFiles(containerData, config);
+          copyContainerToDestination(destination);
+        }
+      } else {
+        copyContainerToDestination(destination);
+      }
+    } finally {
+      if (lock.isWriteLockedByCurrentThread()) {
+        writeUnlock();
+      } else {
+        readUnlock();
+      }
+    }
+  }
+
   /**
    * Acquire read lock.
    */
@@ -885,4 +939,16 @@ public class KeyValueContainer implements Container<KeyValueContainerData> {
       packer.pack(this, destination);
     }
   }
+
+  private void copyContainerToDestination(Path destination)
+      throws IOException {
+
+    FileUtils.copyDirectory(containerData.getDbFile(),
+        destination.resolve(DB_DIR_NAME).toFile());
+    FileUtils.copyDirectory(Paths.get(containerData.getChunksPath()).toFile(),
+        destination.resolve(CHUNK_DIR_NAME).toFile());
+    FileUtils.copyDirectory(getContainerFile(),
+        destination.resolve(CONTAINER_FILE_NAME).toFile());
+  }
+
 }

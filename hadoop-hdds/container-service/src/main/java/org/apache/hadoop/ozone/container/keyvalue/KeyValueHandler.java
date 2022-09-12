@@ -22,6 +22,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.ByteBuffer;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedList;
@@ -1108,6 +1109,13 @@ public class KeyValueHandler extends Handler {
         LOG.debug("block {} chunk {} deleted", blockData.getBlockID(), info);
       }
     }
+  }
+
+  @Override
+  public void copyContainer(final Container container, Path destinationPath)
+      throws IOException {
+    final KeyValueContainer kvc = (KeyValueContainer) container;
+    kvc.copyContainerData(destinationPath);
   }
 
   private void deleteInternal(Container container, boolean force)

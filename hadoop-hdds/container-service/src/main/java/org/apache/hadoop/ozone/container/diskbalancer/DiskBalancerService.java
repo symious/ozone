@@ -19,22 +19,41 @@ package org.apache.hadoop.ozone.container.diskbalancer;
 
 import com.google.common.base.Preconditions;
 import com.google.common.base.Strings;
+import com.google.common.collect.Lists;
+import org.apache.commons.lang3.tuple.Pair;
 import org.apache.hadoop.hdds.HddsConfigKeys;
 import org.apache.hadoop.hdds.conf.ConfigurationSource;
 import org.apache.hadoop.hdds.protocol.DatanodeDetails;
 import org.apache.hadoop.hdds.protocol.proto.StorageContainerDatanodeProtocolProtos.DiskBalancerReportProto;
+import org.apache.hadoop.hdds.scm.container.common.helpers.StorageContainerException;
 import org.apache.hadoop.hdds.scm.storage.DiskBalancerConfiguration;
 import org.apache.hadoop.hdds.server.ServerUtils;
 import org.apache.hadoop.hdds.utils.BackgroundService;
+import org.apache.hadoop.hdds.utils.BackgroundTask;
 import org.apache.hadoop.hdds.utils.BackgroundTaskQueue;
+import org.apache.hadoop.hdds.utils.BackgroundTaskResult;
 import org.apache.hadoop.ozone.OzoneConsts;
+import org.apache.hadoop.ozone.container.common.impl.ContainerData;
+import org.apache.hadoop.ozone.container.common.interfaces.Container;
 import org.apache.hadoop.ozone.container.common.statemachine.DatanodeConfiguration;
+import org.apache.hadoop.ozone.container.common.volume.HddsVolume;
+import org.apache.hadoop.ozone.container.common.volume.ImmutableVolumeSet;
+import org.apache.hadoop.ozone.container.common.volume.MutableVolumeSet;
+import org.apache.hadoop.ozone.container.common.volume.StorageVolume;
+import org.apache.hadoop.ozone.container.common.volume.VolumeSet;
+import org.apache.hadoop.ozone.container.keyvalue.statemachine.background.BlockDeletingService;
 import org.apache.hadoop.ozone.container.ozoneimpl.OzoneContainer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.File;
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 
@@ -52,6 +71,11 @@ public class DiskBalancerService extends BackgroundService {
   private long bandwidthInMB;
   private int parallelThread;
 
+  private Map<DiskBalancerTask, Integer> inProgressTasks;
+  private Set<Long> inProgressContainers;
+  private Map<HddsVolume, Long> deltaSizes;
+  private MutableVolumeSet volumeSet;
+
   private final File diskBalancerInfoFile;
 
   public DiskBalancerService(OzoneContainer ozoneContainer,
@@ -65,6 +89,10 @@ public class DiskBalancerService extends BackgroundService {
     String diskBalancerInfoPath = getDiskBalancerInfoPath(conf);
     Preconditions.checkNotNull(diskBalancerInfoPath);
     diskBalancerInfoFile = new File(diskBalancerInfoPath);
+
+    inProgressTasks = new ConcurrentHashMap<>();
+    inProgressContainers = ConcurrentHashMap.newKeySet();
+    volumeSet = ozoneContainer.getVolumeSet();
 
     loadDiskBalancerInfo();
   }
@@ -211,6 +239,65 @@ public class DiskBalancerService extends BackgroundService {
 
   @Override
   public BackgroundTaskQueue getTasks() {
-    return null;
+    if (!shouldRun) {
+      return null;
+    }
+    BackgroundTaskQueue queue = new BackgroundTaskQueue();
+
+    int availableTaskCount = parallelThread - inProgressTasks.size();
+    if (availableTaskCount <= 0) {
+      LOG.info("No available thread for disk balancer service. " +
+          "Current thread count is {}.", parallelThread);
+      return null;
+    }
+
+    for (int i = 0; i < availableTaskCount; i++) {
+      Pair<HddsVolume, HddsVolume> pair =
+          DiskBalancerUtils.getVolumePair(volumeSet, threshold, deltaSizes);
+      if (pair == null) {
+        continue;
+      }
+      HddsVolume sourceVolume = pair.getLeft(), destVolume = pair.getRight();
+      Iterator<Container<?>> itr = ozoneContainer.getController()
+          .getContainers(sourceVolume);
+      while(itr.hasNext()) {
+        ContainerData containerData = itr.next().getContainerData();
+        if (!inProgressContainers.contains(
+            containerData.getContainerID()) && containerData.isClosed()) {
+          queue.add(new DiskBalancerTask(containerData, sourceVolume,
+              destVolume));
+          inProgressContainers.add(containerData.getContainerID());
+          deltaSizes.put(sourceVolume, deltaSizes.getOrDefault(sourceVolume, 0L)
+              - containerData.getMaxSize());
+          deltaSizes.put(destVolume, deltaSizes.getOrDefault(destVolume, 0L)
+              + containerData.getMaxSize());
+        }
+      }
+    }
+    return queue;
+  }
+
+  private class DiskBalancerTask implements BackgroundTask {
+
+    HddsVolume sourceVolume;
+    HddsVolume destVolume;
+    ContainerData containerData;
+
+    public DiskBalancerTask(ContainerData containerData,
+        HddsVolume sourceVolume, HddsVolume destVolume) {
+      this.containerData = containerData;
+      this.sourceVolume = sourceVolume;
+      this.destVolume = destVolume;
+    }
+
+    @Override
+    public BackgroundTaskResult call() throws Exception {
+      return null;
+    }
+
+    @Override
+    public int getPriority() {
+      return BackgroundTask.super.getPriority();
+    }
   }
 }
