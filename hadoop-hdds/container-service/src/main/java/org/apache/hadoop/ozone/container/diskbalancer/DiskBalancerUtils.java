@@ -21,15 +21,19 @@ import org.apache.commons.lang3.tuple.Pair;
 import org.apache.hadoop.ozone.container.common.utils.StorageVolumeUtil;
 import org.apache.hadoop.ozone.container.common.volume.HddsVolume;
 import org.apache.hadoop.ozone.container.common.volume.MutableVolumeSet;
-import org.apache.hadoop.ozone.container.common.volume.StorageVolume;
-import org.apache.hadoop.ozone.container.common.volume.VolumeSet;
 
-import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
-public class DiskBalancerUtils {
+/**
+ * Util class for DiskBalancer.
+ */
+public final class DiskBalancerUtils {
+
+  private DiskBalancerUtils() {
+
+  }
 
   /**
    * Choosing source volume and dest volume.

@@ -17,7 +17,6 @@
 
 package org.apache.hadoop.ozone.container.diskbalancer;
 
-import org.apache.hadoop.hdds.scm.storage.DiskBalancerConfiguration;
 import org.yaml.snakeyaml.DumperOptions;
 import org.yaml.snakeyaml.Yaml;
 
@@ -29,7 +28,15 @@ import java.io.OutputStreamWriter;
 import java.io.Writer;
 import java.nio.charset.StandardCharsets;
 
-public class DiskBalancerYaml {
+/**
+ * Class for creating diskbalancer.info file in yaml format.
+ */
+
+public final class DiskBalancerYaml {
+
+  private DiskBalancerYaml() {
+    // static helper methods only, no state.
+  }
 
   /**
    * Creates a yaml file to store DiskBalancer info.
@@ -68,7 +75,8 @@ public class DiskBalancerYaml {
         throw new IOException("Unable to parse yaml file.", e);
       }
 
-      diskBalancerInfo = new DiskBalancerInfo(diskBalancerInfoYaml.isShouldRun(),
+      diskBalancerInfo = new DiskBalancerInfo(
+          diskBalancerInfoYaml.isShouldRun(),
           diskBalancerInfoYaml.getThreshold(),
           diskBalancerInfoYaml.getBandwidthInMB(),
           diskBalancerInfoYaml.getParallelThread());

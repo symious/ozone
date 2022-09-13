@@ -18,6 +18,9 @@ package org.apache.hadoop.ozone.container.diskbalancer;
 
 import org.apache.hadoop.hdds.scm.storage.DiskBalancerConfiguration;
 
+/**
+ * DiskBalancer's information to persist.
+ */
 public class DiskBalancerInfo {
   private boolean shouldRun;
   private double threshold;

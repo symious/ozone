@@ -75,17 +75,17 @@ public class DiskBalancerCommandHandler implements CommandHandler {
 
     try {
       switch (opType) {
-        case start:
-          diskBalancerInfo.setShouldRun(true);
-          diskBalancerInfo.updateFromConf(diskBalancerConf);
-          break;
-        case stop:
-          diskBalancerInfo.setShouldRun(false);
-          break;
-        case update:
-          diskBalancerInfo.updateFromConf(diskBalancerConf);
-          break;
-        default:
+      case start:
+        diskBalancerInfo.setShouldRun(true);
+        diskBalancerInfo.updateFromConf(diskBalancerConf);
+        break;
+      case stop:
+        diskBalancerInfo.setShouldRun(false);
+        break;
+      case update:
+        diskBalancerInfo.updateFromConf(diskBalancerConf);
+        break;
+      default:
       }
       ozoneContainer.getDiskBalancerService().refresh(diskBalancerInfo);
     } catch (IOException e) {
