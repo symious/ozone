@@ -121,6 +121,12 @@ public abstract class Handler {
       throws IOException;
 
   /**
+   * Imports container from a container path.
+   */
+  public abstract Container importContainer(
+      ContainerData containerData, Path containerPath) throws IOException;
+
+  /**
    * Exports container to the output stream.
    */
   public abstract void exportContainer(

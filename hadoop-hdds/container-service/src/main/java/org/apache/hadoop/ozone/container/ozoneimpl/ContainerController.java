@@ -163,6 +163,14 @@ public class ContainerController {
         .importContainer(containerData, rawContainerStream, packer);
   }
 
+  public Container importContainer(
+      final ContainerData containerData,
+      final Path containerPath)
+      throws IOException {
+    return handlers.get(containerData.getContainerType())
+        .importContainer(containerData, containerPath);
+  }
+
   public void exportContainer(final ContainerType type,
       final long containerId, final OutputStream outputStream,
       final TarContainerPacker packer) throws IOException {

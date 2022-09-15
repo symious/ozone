@@ -134,6 +134,11 @@ public interface Container<CONTAINERDATA extends ContainerData> extends RwLock {
       ContainerPacker<CONTAINERDATA> packer) throws IOException;
 
   /**
+   * Import the container from a container path.
+   */
+  void importContainerData(Path containerPath) throws IOException;
+
+  /**
    * Export all the data of the container to one output archive with the help
    * of the packer.
    *
