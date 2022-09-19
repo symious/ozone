@@ -729,6 +729,8 @@ public class KeyValueContainer implements Container<KeyValueContainerData> {
       } else {
         copyContainerToDestination(destination);
       }
+    } catch (Exception e) {
+      e.printStackTrace();
     } finally {
       if (lock.isWriteLockedByCurrentThread()) {
         writeUnlock();

@@ -17,12 +17,14 @@
 
 package org.apache.hadoop.ozone.container.diskbalancer;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Strings;
 import org.apache.commons.lang3.tuple.Pair;
 import org.apache.hadoop.hdds.HddsConfigKeys;
 import org.apache.hadoop.hdds.conf.ConfigurationSource;
 import org.apache.hadoop.hdds.protocol.DatanodeDetails;
+import org.apache.hadoop.hdds.protocol.proto.HddsProtos;
 import org.apache.hadoop.hdds.protocol.proto.StorageContainerDatanodeProtocolProtos.DiskBalancerReportProto;
 import org.apache.hadoop.hdds.scm.storage.DiskBalancerConfiguration;
 import org.apache.hadoop.hdds.server.ServerUtils;
@@ -42,6 +44,7 @@ import org.apache.hadoop.ozone.container.common.volume.MutableVolumeSet;
 import org.apache.hadoop.ozone.container.keyvalue.helpers.KeyValueContainerLocationUtil;
 import org.apache.hadoop.ozone.container.ozoneimpl.OzoneContainer;
 import org.apache.hadoop.ozone.container.upgrade.VersionedDatanodeFeatures;
+import org.apache.hadoop.util.Time;
 import org.apache.ratis.util.FileUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -58,6 +61,7 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 
 
 /**
@@ -79,12 +83,18 @@ public class DiskBalancerService extends BackgroundService {
   private long bandwidthInMB;
   private int parallelThread;
 
+  private AtomicLong totalBalancedBytes = new AtomicLong(0L);
+  private AtomicLong balancedBytesInLastWindow = new AtomicLong(0L);
+  private long nextAvailableTime = Time.monotonicNow();
+
   private Map<DiskBalancerTask, Integer> inProgressTasks;
   private Set<Long> inProgressContainers;
   private Map<HddsVolume, Long> deltaSizes;
   private MutableVolumeSet volumeSet;
 
   private final File diskBalancerInfoFile;
+
+  private DiskBalancerServiceMetrics metrics;
 
   public DiskBalancerService(OzoneContainer ozoneContainer,
       long serviceCheckInterval, long serviceCheckTimeout, TimeUnit timeUnit,
@@ -100,7 +110,10 @@ public class DiskBalancerService extends BackgroundService {
 
     inProgressTasks = new ConcurrentHashMap<>();
     inProgressContainers = ConcurrentHashMap.newKeySet();
+    deltaSizes = new ConcurrentHashMap<>();
     volumeSet = ozoneContainer.getVolumeSet();
+
+    metrics = DiskBalancerServiceMetrics.create();
 
     loadDiskBalancerInfo();
 
@@ -241,15 +254,15 @@ public class DiskBalancerService extends BackgroundService {
     this.shouldRun = shouldRun;
   }
 
-  private void setThreshold(double threshold) {
+  public void setThreshold(double threshold) {
     this.threshold = threshold;
   }
 
-  private void setBandwidthInMB(long bandwidthInMB) {
+  public void setBandwidthInMB(long bandwidthInMB) {
     this.bandwidthInMB = bandwidthInMB;
   }
 
-  private void setParallelThread(int parallelThread) {
+  public void setParallelThread(int parallelThread) {
     this.parallelThread = parallelThread;
   }
 
@@ -259,21 +272,38 @@ public class DiskBalancerService extends BackgroundService {
   }
 
   public DiskBalancerReportProto getDiskBalancerReportProto() {
-    return null;
+    DiskBalancerReportProto.Builder builder =
+        DiskBalancerReportProto.newBuilder();
+    return builder.setIsRunning(shouldRun)
+        .setBalancedBytes(totalBalancedBytes.get())
+        .setDiskBalancerConf(
+            HddsProtos.DiskBalancerConfigurationProto.newBuilder()
+                .setThreshold(threshold)
+                .setDiskBandwidthInMB(bandwidthInMB)
+                .setParallelThread(parallelThread)
+                .build())
+        .build();
   }
 
   @Override
   public BackgroundTaskQueue getTasks() {
-    if (!shouldRun) {
-      return null;
-    }
     BackgroundTaskQueue queue = new BackgroundTaskQueue();
+
+    if (!shouldRun) {
+      return queue;
+    }
+    metrics.incrRunningLoopCount();
+
+    if (shouldDelay()) {
+      metrics.incrIdleLoopExceedsBandwidthCount();
+      return queue;
+    }
 
     int availableTaskCount = parallelThread - inProgressTasks.size();
     if (availableTaskCount <= 0) {
       LOG.info("No available thread for disk balancer service. " +
           "Current thread count is {}.", parallelThread);
-      return null;
+      return queue;
     }
 
     for (int i = 0; i < availableTaskCount; i++) {
@@ -293,23 +323,33 @@ public class DiskBalancerService extends BackgroundService {
               destVolume));
           inProgressContainers.add(containerData.getContainerID());
           deltaSizes.put(sourceVolume, deltaSizes.getOrDefault(sourceVolume, 0L)
-              - containerData.getMaxSize());
+              - containerData.getBytesUsed());
           deltaSizes.put(destVolume, deltaSizes.getOrDefault(destVolume, 0L)
-              + containerData.getMaxSize());
+              + containerData.getBytesUsed());
         }
       }
+    }
+    if (queue.isEmpty()) {
+      metrics.incrIdleLoopNoAvailableVolumePairCount();
     }
     return queue;
   }
 
-  private static class DiskBalancerTaskResult implements BackgroundTaskResult {
-    DiskBalancerTaskResult() {
+  private boolean shouldDelay() {
+    // We should wait for next AvailableTime.
+    if (Time.monotonicNow() <= nextAvailableTime) {
+      return true;
     }
+    // Calculate the next AvailableTime based on bandwidth
+    long bytesBalanced = balancedBytesInLastWindow.getAndSet(0L);
 
-    @Override
-    public int getSize() {
-      return 0;
-    }
+    final int megaByte = 1024 * 1024;
+
+    // converting disk bandwidth in byte/millisec
+    float bandwidth = bandwidthInMB * megaByte / 1000f;
+    nextAvailableTime = Time.monotonicNow() +
+        ((long) (bytesBalanced / bandwidth));
+    return false;
   }
 
   private class DiskBalancerTask implements BackgroundTask {
@@ -333,8 +373,6 @@ public class DiskBalancerService extends BackgroundService {
       Path diskBalancerTmpDir = null, diskBalancerDestDir = null;
       long containerSize = containerData.getBytesUsed();
       try {
-        preCall();
-
         diskBalancerTmpDir = Paths.get(destVolume.getTmpDir().getPath())
             .resolve(DISK_BALANCER_DIR).resolve(String.valueOf(containerId));
 
@@ -350,6 +388,10 @@ public class DiskBalancerService extends BackgroundService {
             Paths.get(KeyValueContainerLocationUtil.getBaseContainerLocation(
                 destVolume.getHddsRootDir().toString(), idDir,
                 containerData.getContainerID()));
+        Path destDirParent = diskBalancerDestDir.getParent();
+        if (destDirParent != null) {
+          Files.createDirectories(destDirParent);
+        }
         Files.move(diskBalancerTmpDir, diskBalancerDestDir,
             StandardCopyOption.ATOMIC_MOVE,
             StandardCopyOption.REPLACE_EXISTING);
@@ -381,12 +423,14 @@ public class DiskBalancerService extends BackgroundService {
         }
         oldContainer.getContainerData().getVolume()
             .decrementUsedSpace(containerSize);
+        metrics.incrSuccessCount(1);
+        metrics.incrSuccessBytes(containerSize);
       } catch (IOException e) {
         try {
           Files.deleteIfExists(diskBalancerTmpDir);
         } catch (IOException ex) {
-          LOG.warn("Failed to delete tmp directory {}: {}.", diskBalancerTmpDir,
-              ex.getMessage());
+          LOG.warn("Failed to delete tmp directory {}", diskBalancerTmpDir,
+              ex);
         }
         if (diskBalancerDestDir != null) {
           try {
@@ -401,6 +445,7 @@ public class DiskBalancerService extends BackgroundService {
         if (destVolumeIncreased) {
           destVolume.decrementUsedSpace(containerSize);
         }
+        metrics.incrFailureCount();
       } finally {
         postCall();
       }
@@ -413,20 +458,12 @@ public class DiskBalancerService extends BackgroundService {
       return BackgroundTask.super.getPriority();
     }
 
-    private void preCall() {
-      inProgressContainers.add(containerData.getContainerID());
-      deltaSizes.put(sourceVolume, deltaSizes.getOrDefault(sourceVolume, 0L)
-          - containerData.getMaxSize());
-      deltaSizes.put(destVolume, deltaSizes.getOrDefault(destVolume, 0L)
-          + containerData.getMaxSize());
-    }
-
     private void postCall() {
       inProgressContainers.remove(containerData.getContainerID());
       deltaSizes.put(sourceVolume, deltaSizes.get(sourceVolume) +
-          containerData.getMaxSize());
+          containerData.getBytesUsed());
       deltaSizes.put(destVolume, deltaSizes.get(destVolume)
-          - containerData.getMaxSize());
+          - containerData.getBytesUsed());
     }
   }
 
@@ -436,5 +473,14 @@ public class DiskBalancerService extends BackgroundService {
 
   public boolean isBalancingContainer(long containerId) {
     return inProgressContainers.contains(containerId);
+  }
+
+  public DiskBalancerServiceMetrics getMetrics() {
+    return metrics;
+  }
+
+  @VisibleForTesting
+  public void setBalancedBytesInLastWindow(long bytes) {
+    this.balancedBytesInLastWindow.set(bytes);
   }
 }

@@ -18,6 +18,8 @@ package org.apache.hadoop.ozone.container.diskbalancer;
 
 import org.apache.hadoop.hdds.scm.storage.DiskBalancerConfiguration;
 
+import java.util.Objects;
+
 /**
  * DiskBalancer's information to persist.
  */
@@ -85,5 +87,25 @@ public class DiskBalancerInfo {
 
   public void setParallelThread(int parallelThread) {
     this.parallelThread = parallelThread;
+  }
+
+  @Override
+  public boolean equals(Object o) {
+    if (this == o) {
+      return true;
+    }
+    if (o == null || getClass() != o.getClass()) {
+      return false;
+    }
+    DiskBalancerInfo that = (DiskBalancerInfo) o;
+    return shouldRun == that.shouldRun &&
+        Double.compare(that.threshold, threshold) == 0 &&
+        bandwidthInMB == that.bandwidthInMB &&
+        parallelThread == that.parallelThread;
+  }
+
+  @Override
+  public int hashCode() {
+    return Objects.hash(shouldRun, threshold, bandwidthInMB, parallelThread);
   }
 }
