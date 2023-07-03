@@ -377,6 +377,8 @@ message OMResponse {
 
   optional ListSnapshotDiffJobResponse       ListSnapshotDiffJobResponse   = 122;
   optional CancelSnapshotDiffResponse       cancelSnapshotDiffResponse   = 123;
+
+  optional OMLockDetailsProto                omLockDetailsProto            = 124;
 }
 
 enum Status {
@@ -1952,6 +1954,13 @@ message SetTimesRequest {
 }
 
 message SetTimesResponse {
+}
+
+message OMLockDetailsProto {
+  optional bool isLockAcquired = 1;
+  optional uint64 waitLockNanos    = 2;
+  optional uint64 readLockNanos    = 3;
+  optional uint64 writeLockNanos   = 4;
 }
 
 /**

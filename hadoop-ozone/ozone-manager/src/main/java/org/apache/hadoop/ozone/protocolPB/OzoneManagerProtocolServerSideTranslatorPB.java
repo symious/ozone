@@ -23,17 +23,21 @@ import static org.apache.hadoop.ozone.protocol.proto.OzoneManagerProtocolProtos.
 
 import java.io.IOException;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 
 import com.google.common.annotations.VisibleForTesting;
 import org.apache.hadoop.hdds.server.OzoneProtocolMessageDispatcher;
 import org.apache.hadoop.hdds.tracing.TracingUtil;
 import org.apache.hadoop.hdds.utils.ProtocolMessageMetrics;
+import org.apache.hadoop.ipc.ProcessingDetails.Timing;
+import org.apache.hadoop.ipc.Server;
 import org.apache.hadoop.ozone.OmUtils;
 import org.apache.hadoop.ozone.om.OzoneManager;
 import org.apache.hadoop.ozone.om.exceptions.OMException;
 import org.apache.hadoop.ozone.om.exceptions.OMLeaderNotReadyException;
 import org.apache.hadoop.ozone.om.exceptions.OMNotLeaderException;
+import org.apache.hadoop.ozone.om.lock.OMLockDetails;
 import org.apache.hadoop.ozone.om.protocolPB.OzoneManagerProtocolPB;
 import org.apache.hadoop.ozone.om.ratis.OzoneManagerDoubleBuffer;
 import org.apache.hadoop.ozone.om.ratis.OzoneManagerRatisServer;
@@ -155,6 +159,25 @@ public class OzoneManagerProtocolServerSideTranslatorPB implements
 
   @VisibleForTesting
   public OMResponse processRequest(OMRequest request) throws ServiceException {
+    OMResponse response = internalProcessRequest(request);
+    if (response.hasOmLockDetailsProto()) {
+      OzoneManagerProtocolProtos.OMLockDetailsProto omLockDetailsProto =
+          response.getOmLockDetailsProto();
+      Server.Call call = Server.getCurCall().get();
+      if (call != null) {
+        call.getProcessingDetails().add(Timing.LOCKWAIT,
+            omLockDetailsProto.getWaitLockNanos(), TimeUnit.NANOSECONDS);
+        call.getProcessingDetails().add(Timing.LOCKSHARED,
+            omLockDetailsProto.getReadLockNanos(), TimeUnit.NANOSECONDS);
+        call.getProcessingDetails().add(Timing.LOCKEXCLUSIVE,
+            omLockDetailsProto.getWriteLockNanos(), TimeUnit.NANOSECONDS);
+      }
+    }
+    return response;
+  }
+
+  private OMResponse internalProcessRequest(OMRequest request) throws
+      ServiceException {
     OMClientRequest omClientRequest = null;
     boolean s3Auth = false;
 
@@ -296,7 +319,10 @@ public class OzoneManagerProtocolServerSideTranslatorPB implements
       ExitUtils.terminate(1, errorMessage, ex, LOG);
       Thread.currentThread().interrupt();
     }
-    return omClientResponse.getOMResponse();
+    OMLockDetails omLockDetails = omClientResponse.getOmLockDetails();
+    OMResponse omResponse = omClientResponse.getOMResponse();
+    return omResponse.toBuilder()
+        .setOmLockDetailsProto(omLockDetails.toProtobufBuilder()).build();
   }
 
   /**

@@ -71,6 +71,7 @@ import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.slf4j.event.Level;
 
 import java.io.FileNotFoundException;
 import java.io.IOException;
@@ -1775,5 +1776,29 @@ public class TestOzoneFileSystem {
     fileStatus = fs.getFileStatus(path);
     // verify that mtime is NOT updated as expected.
     Assert.assertEquals(mtime, fileStatus.getModificationTime());
+  }
+
+  @Test
+  public void testProcessingDetails() throws IOException, InterruptedException {
+    final Logger log = LoggerFactory.getLogger(
+        "org.apache.hadoop.ipc.ProcessingDetails");
+    GenericTestUtils.setLogLevel(log, Level.DEBUG);
+    GenericTestUtils.LogCapturer logCapturer =
+        GenericTestUtils.LogCapturer.captureLogs(log);
+    // Create single replica 1024 byte key.
+    int keySize = 1024;
+    TestDataUtil.createKey(ozoneBucket, "key1", new String(new byte[keySize]));
+    logCapturer.stopCapturing();
+    String logContent = logCapturer.getOutput();
+
+    int nonZeroLines = 0;
+    for (String s: logContent.split("\n")) {
+      if (!s.contains("locksharedTime=0 lockexclusiveTime=0")) {
+        nonZeroLines++;
+      }
+    }
+
+    Assert.assertNotEquals(nonZeroLines, 0);
+
   }
 }

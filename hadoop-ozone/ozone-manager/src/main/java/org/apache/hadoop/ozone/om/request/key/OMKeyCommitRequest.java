@@ -162,9 +162,10 @@ public class OMKeyCommitRequest extends OMKeyRequest {
       List<OmKeyLocationInfo>
           locationInfoList = getOmKeyLocationInfos(ozoneManager, commitKeyArgs);
 
-      bucketLockAcquired =
-          omMetadataManager.getLock().acquireWriteLock(BUCKET_LOCK,
-              volumeName, bucketName);
+      getOmLockDetails().merge(
+          omMetadataManager.getLock().acquireWriteLock(BUCKET_LOCK, volumeName,
+              bucketName));
+      bucketLockAcquired = getOmLockDetails().isLockAcquired();
 
       validateBucketAndVolume(omMetadataManager, volumeName, bucketName);
       omBucketInfo = getBucketInfo(omMetadataManager, volumeName, bucketName);
@@ -291,8 +292,11 @@ public class OMKeyCommitRequest extends OMKeyRequest {
           omDoubleBufferHelper);
 
       if (bucketLockAcquired) {
-        omMetadataManager.getLock().releaseWriteLock(BUCKET_LOCK, volumeName,
-            bucketName);
+        getOmLockDetails().merge(omMetadataManager.getLock()
+            .releaseWriteLock(BUCKET_LOCK, volumeName, bucketName));
+      }
+      if (omClientResponse != null) {
+        omClientResponse.setOmLockDetails(getOmLockDetails());
       }
     }
 

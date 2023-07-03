@@ -76,7 +76,7 @@ public class TestOzoneManagerLock {
     }
   }
 
-  protected boolean acquireWriteLock(OzoneManagerLock lock,
+  protected OMLockDetails acquireWriteLock(OzoneManagerLock lock,
                                      OzoneManagerLock.Resource resource,
                                      String[] resourceName) {
     if (resource == OzoneManagerLock.Resource.KEY_PATH_LOCK) {
@@ -98,7 +98,7 @@ public class TestOzoneManagerLock {
     }
   }
 
-  protected boolean acquireReadLock(OzoneManagerLock lock,
+  protected OMLockDetails acquireReadLock(OzoneManagerLock lock,
                                      OzoneManagerLock.Resource resource,
                                      String[] resourceName) {
     if (resource == OzoneManagerLock.Resource.KEY_PATH_LOCK) {

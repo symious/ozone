@@ -122,8 +122,9 @@ public class OMVolumeSetOwnerRequest extends OMVolumeRequest {
       OzoneManagerStorageProtos.PersistedUserVolumeInfo newOwnerVolumeList;
       OmVolumeArgs omVolumeArgs = null;
 
-      acquiredVolumeLock = omMetadataManager.getLock().acquireWriteLock(
-          VOLUME_LOCK, volume);
+      getOmLockDetails().merge(omMetadataManager.getLock().acquireWriteLock(
+          VOLUME_LOCK, volume));
+      acquiredVolumeLock = getOmLockDetails().isLockAcquired();
       omVolumeArgs = getVolumeInfo(omMetadataManager, volume);
       oldOwner = omVolumeArgs.getOwnerName();
 
@@ -187,7 +188,12 @@ public class OMVolumeSetOwnerRequest extends OMVolumeRequest {
         omMetadataManager.getLock().releaseMultiUserLock(newOwner, oldOwner);
       }
       if (acquiredVolumeLock) {
+        getOmLockDetails().merge(omMetadataManager.getLock()
+            .releaseWriteLock(VOLUME_LOCK, volume));
         omMetadataManager.getLock().releaseWriteLock(VOLUME_LOCK, volume);
+      }
+      if (omClientResponse != null) {
+        omClientResponse.setOmLockDetails(getOmLockDetails());
       }
     }
 
