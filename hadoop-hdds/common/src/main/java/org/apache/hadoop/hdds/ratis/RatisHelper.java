@@ -624,7 +624,11 @@ public final class RatisHelper {
     try {
       final int attempts = calculateAttempts(pollInterval, timeout);
       final TimeDuration sleepTime = TimeDuration.valueOf(pollInterval.toMillis(), MILLISECONDS);
-      JavaUtils.attemptUntilTrue(condition, attempts, sleepTime, null, null);
+      JavaUtils.attempt(() -> {
+        if (!condition.getAsBoolean()) {
+          throw new IllegalStateException("Condition is false.");
+        }
+      }, attempts, sleepTime, null, null);
       return true;
     } catch (InterruptedException | IllegalStateException exception) {
       return false;
