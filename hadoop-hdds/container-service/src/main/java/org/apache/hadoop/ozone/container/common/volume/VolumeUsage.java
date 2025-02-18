@@ -69,13 +69,11 @@ public class VolumeUsage {
    * <pre>
    * {@code
    * Calculate available space use method B.
-   * |----used----|   (avail)   |++++++++reserved++++++++|
-   *              |     fsAvail      |-------other-------|
-   *                          -&gt;|~~~~|&lt;-
-   *                      remainingReserved
+   * |----used----|          fsAvail           |---other---|
+   * |----used----|   (avail)   |+++reserved+++|---other---|
    * }
    * </pre>
-   * B) avail = fsAvail - Max(reserved - other, 0);
+   * B) avail = fsAvail - Max(reserved, 0);
    */
   public SpaceUsageSource getCurrentUsage() {
     SpaceUsageSource real = realUsage();
@@ -84,7 +82,7 @@ public class VolumeUsage {
         ? real
         : new SpaceUsageSource.Fixed(
             Math.max(real.getCapacity() - reservedInBytes, 0),
-            Math.max(real.getAvailable() - getRemainingReserved(real), 0),
+            Math.max(real.getAvailable() - reservedInBytes, 0),
             real.getUsedSpace());
   }
 
@@ -94,21 +92,6 @@ public class VolumeUsage {
 
   public void decrementUsedSpace(long reclaimedSpace) {
     source.decrementUsedSpace(reclaimedSpace);
-  }
-
-  /**
-   * Get the space used by others except hdds.
-   * DU is refreshed periodically and could be not exact,
-   * so there could be that DU value > totalUsed when there are deletes.
-   * @return other used space
-   */
-  private static long getOtherUsed(SpaceUsageSource usage) {
-    long totalUsed = usage.getCapacity() - usage.getAvailable();
-    return Math.max(totalUsed - usage.getUsedSpace(), 0L);
-  }
-
-  private long getRemainingReserved(SpaceUsageSource usage) {
-    return Math.max(reservedInBytes - getOtherUsed(usage), 0L);
   }
 
   public synchronized void start() {
