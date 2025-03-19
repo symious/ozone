@@ -104,8 +104,9 @@ public class RunningDatanodeState implements DatanodeState {
                 .submit(endpointTask)
                 .get(context.getHeartbeatFrequency(), TimeUnit.MILLISECONDS);
           } catch (TimeoutException e) {
-            LOG.warn("Timeout occurred on endpoint: " + endpoint.getAddress());
-            throw e;
+            TimeoutException timeoutEx = new TimeoutException("Timeout occurred on endpoint: " + endpoint.getAddress());
+            timeoutEx.initCause(e);
+            throw timeoutEx;
           }
         });
       } else {
