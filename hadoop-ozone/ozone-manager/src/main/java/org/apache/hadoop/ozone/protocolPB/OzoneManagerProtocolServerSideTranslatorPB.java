@@ -34,6 +34,7 @@ import org.apache.hadoop.hdds.utils.ProtocolMessageMetrics;
 import org.apache.hadoop.ipc.ProcessingDetails.Timing;
 import org.apache.hadoop.ipc.Server;
 import org.apache.hadoop.ozone.OmUtils;
+import org.apache.hadoop.ozone.om.OMMetrics;
 import org.apache.hadoop.ozone.om.OMPerformanceMetrics;
 import org.apache.hadoop.ozone.om.OzoneManager;
 import org.apache.hadoop.ozone.om.exceptions.OMException;
@@ -74,6 +75,7 @@ public class OzoneManagerProtocolServerSideTranslatorPB implements OzoneManagerP
   private final OMPerformanceMetrics perfMetrics;
 
   private OMRequest lastRequestToSubmit;
+  private OMMetrics omMetrics;
 
   /**
    * Constructs an instance of the server handler.
@@ -86,6 +88,7 @@ public class OzoneManagerProtocolServerSideTranslatorPB implements OzoneManagerP
       ProtocolMessageMetrics<ProtocolMessageEnum> metrics) {
     this.ozoneManager = impl;
     this.perfMetrics = impl.getPerfMetrics();
+    this.omMetrics = impl.getMetrics();
 
     this.handler = new OzoneManagerRequestHandler(impl);
     this.omRatisServer = ratisServer;
@@ -194,8 +197,11 @@ public class OzoneManagerProtocolServerSideTranslatorPB implements OzoneManagerP
         allowFollowerReadLocalLease(omRatisServer.getServerDivision(),
             ozoneManager.getFollowerReadLocalLeaseLagLimit(),
             ozoneManager.getFollowerReadLocalLeaseTimeMs())) {
+      omMetrics.incNumLocalLeaseRead();
       return handler.handleReadRequest(request);
-    } else if (omRatisServer.isLinearizableRead()) {
+    }
+
+    if (omRatisServer.isLinearizableRead()) {
       return ozoneManager.getOmExecutionFlow().submit(request, false);
     }
     // Check if this OM is the leader.
