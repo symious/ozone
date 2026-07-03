@@ -60,6 +60,8 @@ import org.apache.hadoop.hdds.scm.container.common.helpers.AllocatedBlock;
 import org.apache.hadoop.hdds.scm.container.common.helpers.ExcludeList;
 import org.apache.hadoop.hdds.scm.exceptions.SCMException;
 import org.apache.hadoop.hdds.security.token.OzoneBlockTokenSecretManager;
+import org.apache.hadoop.hdds.utils.db.Table;
+import org.apache.hadoop.hdds.utils.db.TableIterator;
 import org.apache.hadoop.hdds.utils.db.cache.CacheKey;
 import org.apache.hadoop.hdds.utils.db.cache.CacheValue;
 import org.apache.hadoop.ipc_.Server;
@@ -907,6 +909,78 @@ public abstract class OMKeyRequest extends OMClientRequest {
   }
 
   /**
+   * Returns the newest noncurrent version of the given key from the
+   * versionedKeyTable as a (dbKey, keyInfo) pair, or null if the key has no
+   * noncurrent versions. Merges the table cache (entries of transactions not
+   * yet flushed, including tombstones) with the underlying DB iterator;
+   * versions of a key are adjacent and ordered newest first (§versionedKeyTable
+   * dbKey layout), so the smallest matching dbKey wins.
+   */
+  protected Pair<String, OmKeyInfo> getNewestNoncurrentVersion(
+      OMMetadataManager omMetadataManager, String volumeName, String bucketName,
+      String keyName) throws IOException {
+    final String prefix = omMetadataManager.getVersionedOzoneKeyPrefix(
+        volumeName, bucketName, keyName);
+    final Table<String, OmKeyInfo> table = omMetadataManager.getVersionedKeyTable();
+
+    String bestKey = null;
+    OmKeyInfo bestValue = null;
+    Iterator<Map.Entry<CacheKey<String>, CacheValue<OmKeyInfo>>> cacheIter = table.cacheIterator();
+    while (cacheIter.hasNext()) {
+      Map.Entry<CacheKey<String>, CacheValue<OmKeyInfo>> entry = cacheIter.next();
+      String dbKey = entry.getKey().getCacheKey();
+      OmKeyInfo value = entry.getValue().getCacheValue();
+      if (value == null || !isVersionedDbKeyOf(dbKey, prefix)) {
+        continue;
+      }
+      if (bestKey == null || dbKey.compareTo(bestKey) < 0) {
+        bestKey = dbKey;
+        bestValue = value;
+      }
+    }
+    try (TableIterator<String, ? extends Table.KeyValue<String, OmKeyInfo>>
+             iter = table.iterator(prefix)) {
+      while (iter.hasNext()) {
+        Table.KeyValue<String, OmKeyInfo> kv = iter.next();
+        String dbKey = kv.getKey();
+        if (!isVersionedDbKeyOf(dbKey, prefix)) {
+          // a version of a longer key name sharing this prefix
+          continue;
+        }
+        CacheValue<OmKeyInfo> cached = table.getCacheValue(new CacheKey<>(dbKey));
+        if (cached != null && cached.getCacheValue() == null) {
+          continue; // deleted in cache, not yet flushed
+        }
+        if (bestKey == null || dbKey.compareTo(bestKey) < 0) {
+          bestKey = dbKey;
+          bestValue = cached != null ? cached.getCacheValue() : kv.getValue();
+        }
+        // first valid DB entry is the smallest one in the DB
+        break;
+      }
+    }
+    return bestKey == null ? null : Pair.of(bestKey, bestValue);
+  }
+
+  /**
+   * Whether {@code dbKey} is a versionedKeyTable entry of exactly the key the
+   * prefix was built for: the remainder must be one fixed-width (16 hex chars)
+   * versionId suffix, since key names may themselves contain the separator.
+   */
+  protected static boolean isVersionedDbKeyOf(String dbKey, String prefix) {
+    if (!dbKey.startsWith(prefix) || dbKey.length() != prefix.length() + 16) {
+      return false;
+    }
+    for (int i = prefix.length(); i < dbKey.length(); i++) {
+      char c = dbKey.charAt(i);
+      if ((c < '0' || c > '9') && (c < 'a' || c > 'f')) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  /**
    * Return bucket info for the specified bucket.
    */
   @Nullable
@@ -969,11 +1043,15 @@ public abstract class OMKeyRequest extends OMClientRequest {
     if (dbKeyInfo != null) {
       // The key already exist, the new blocks will replace old ones
       // as new versions unless the bucket does not have versioning
-      // turned on.
-      dbKeyInfo.addNewVersion(locations, false,
-              omBucketInfo.getIsVersionEnabled());
+      // turned on. With S3-compatible versioning, the previous current
+      // version is preserved as a separate record in the versionedKeyTable
+      // at commit time, so the in-record block-version list is not used to
+      // accumulate object versions and always holds a single version.
+      boolean keepInRecordVersions = omBucketInfo.getIsVersionEnabled()
+          && !omBucketInfo.isS3VersioningEnabled();
+      dbKeyInfo.addNewVersion(locations, false, keepInRecordVersions);
       long newSize = size;
-      if (omBucketInfo.getIsVersionEnabled()) {
+      if (keepInRecordVersions) {
         newSize += dbKeyInfo.getDataSize();
       }
       // The modification time is set in preExecute. Use the same

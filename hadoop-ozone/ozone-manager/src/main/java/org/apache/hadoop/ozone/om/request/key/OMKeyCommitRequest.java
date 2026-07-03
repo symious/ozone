@@ -307,13 +307,22 @@ public class OMKeyCommitRequest extends OMKeyRequest {
       // not persisted in the key table.
       // Combination
       // Set the UpdateID to current transactionLogIndex
-      omKeyInfo = omKeyInfo.toBuilder()
+      final boolean s3Versioning = omBucketInfo.isS3VersioningEnabled();
+      OmKeyInfo.Builder committedKeyBuilder = omKeyInfo.toBuilder()
           .setExpectedDataGeneration(null)
           .addAllMetadata(KeyValueUtil.getFromProtobuf(
                 commitKeyArgs.getMetadataList()))
           .setUpdateID(trxnLogIndex)
-          .setDataSize(commitKeyArgs.getDataSize())
-          .build();
+          .setDataSize(commitKeyArgs.getDataSize());
+      if (s3Versioning) {
+        // The version identity is assigned once when the version is created
+        // and stays frozen afterwards: an hsync re-commit of the same open
+        // key keeps the versionId of the version it is updating.
+        committedKeyBuilder.setVersionId(isSameHsyncKey
+            ? keyToDelete.getVersionId()
+            : ozoneManager.getObjectIdFromTxId(trxnLogIndex));
+      }
+      omKeyInfo = committedKeyBuilder.build();
 
       // Update the block length for each block, return the allocated but
       // uncommitted blocks
@@ -404,6 +413,24 @@ public class OMKeyCommitRequest extends OMKeyRequest {
             dbOpenKey, newOpenKeyInfo, trxnLogIndex);
       }
 
+      // With S3-compatible versioning, keep the overwritten current version
+      // as a noncurrent version in the versionedKeyTable. Records that
+      // predate versioning become the key's single null version and take the
+      // reserved NULL_VERSION_ID slot.
+      String dbVersionedKey = null;
+      OmKeyInfo versionedKeyInfo = null;
+      if (s3Versioning && keyToDelete != null && !isSameHsyncKey) {
+        versionedKeyInfo = keyToDelete.getVersionId() != null ? keyToDelete
+            : keyToDelete.toBuilder()
+                .setVersionId(OmKeyInfo.NULL_VERSION_ID)
+                .setNullVersion(true)
+                .build();
+        dbVersionedKey = omMetadataManager.getVersionedOzoneKey(
+            volumeName, bucketName, keyName, versionedKeyInfo.getVersionId());
+        omMetadataManager.getVersionedKeyTable().addCacheEntry(
+            dbVersionedKey, versionedKeyInfo, trxnLogIndex);
+      }
+
       omMetadataManager.getKeyTable(getBucketLayout()).addCacheEntry(
           dbOzoneKey, omKeyInfo, trxnLogIndex);
 
@@ -411,7 +438,8 @@ public class OMKeyCommitRequest extends OMKeyRequest {
 
       omClientResponse = new OMKeyCommitResponse(omResponse.build(),
           omKeyInfo, dbOzoneKey, dbOpenKey, omBucketInfo.copyObject(),
-          oldKeyVersionsToDeleteMap, isHSync, newOpenKeyInfo, dbOpenKeyToDeleteKey, openKeyToDelete);
+          oldKeyVersionsToDeleteMap, isHSync, newOpenKeyInfo, dbOpenKeyToDeleteKey, openKeyToDelete)
+          .withVersionedKey(dbVersionedKey, versionedKeyInfo);
 
       result = Result.SUCCESS;
     } catch (IOException | InvalidPathException ex) {

@@ -115,6 +115,10 @@ public final class OmKeyInfo extends WithParentObjectId
   // absent on records that predate versioning support (treated as the null
   // version). A delete marker has isDeleteMarker set and no data blocks.
   // isNullVersion marks the single overwritable "null version" slot per key.
+
+  /** Reserved versionId for the single "null version" slot of a key. */
+  public static final long NULL_VERSION_ID = 0L;
+
   private final Long versionId;
   private final boolean isDeleteMarker;
   private final boolean isNullVersion;

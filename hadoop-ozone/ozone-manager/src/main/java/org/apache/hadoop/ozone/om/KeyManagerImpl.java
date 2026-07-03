@@ -599,9 +599,15 @@ public class KeyManagerImpl implements KeyManager {
               bucketLayout);
 
       if (bucketLayout.isFileSystemOptimized()) {
+        if (args.getVersionId() != null) {
+          throw new OMException("versionId is not supported for buckets with"
+              + " FILE_SYSTEM_OPTIMIZED layout",
+              OMException.ResultCodes.INVALID_REQUEST);
+        }
         value = getOmKeyInfoFSO(volumeName, bucketName, keyName);
       } else {
-        value = getOmKeyInfo(volumeName, bucketName, keyName, bucketLayout);
+        value = getOmKeyInfo(volumeName, bucketName, keyName, bucketLayout,
+            args.getVersionId());
         if (value != null) {
           // For Legacy & OBS buckets, any key is a file by default. This is to
           // keep getKeyInfo compatible with OFS clients.
@@ -652,11 +658,38 @@ public class KeyManagerImpl implements KeyManager {
 
   private OmKeyInfo getOmKeyInfo(String volumeName, String bucketName,
       String keyName, BucketLayout bucketLayout) throws IOException {
+    return getOmKeyInfo(volumeName, bucketName, keyName, bucketLayout, null);
+  }
+
+  /**
+   * Reads a key, optionally addressing a specific object version
+   * (S3-compatible versioning): the current version in the keyTable is
+   * checked first, then the versionedKeyTable. Without a versionId, a
+   * current delete marker hides the key from reads.
+   */
+  private OmKeyInfo getOmKeyInfo(String volumeName, String bucketName,
+      String keyName, BucketLayout bucketLayout, Long versionId)
+      throws IOException {
     String keyBytes =
         metadataManager.getOzoneKey(volumeName, bucketName, keyName);
-    return metadataManager
+    OmKeyInfo current = metadataManager
         .getKeyTable(bucketLayout)
         .get(keyBytes);
+    if (versionId == null) {
+      if (current != null && current.isDeleteMarker()) {
+        throw new OMException("Key:" + keyName + " not found (the current"
+            + " version is a delete marker)", KEY_NOT_FOUND);
+      }
+      return current;
+    }
+    if (current != null && (current.getVersionId() != null
+        ? current.getVersionId().longValue() == versionId.longValue()
+        : versionId.longValue() == OmKeyInfo.NULL_VERSION_ID)) {
+      return current;
+    }
+    return metadataManager.getVersionedKeyTable().get(
+        metadataManager.getVersionedOzoneKey(
+            volumeName, bucketName, keyName, versionId));
   }
 
   /**

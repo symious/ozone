@@ -24,8 +24,14 @@ import static org.apache.hadoop.ozone.util.MetricUtil.captureLatencyNs;
 
 import java.io.IOException;
 import java.nio.file.InvalidPathException;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
+import org.apache.commons.lang3.tuple.Pair;
+import org.apache.hadoop.hdds.client.RatisReplicationConfig;
+import org.apache.hadoop.hdds.protocol.proto.HddsProtos.ReplicationFactor;
 import org.apache.hadoop.hdds.utils.db.Table;
 import org.apache.hadoop.hdds.utils.db.cache.CacheKey;
 import org.apache.hadoop.hdds.utils.db.cache.CacheValue;
@@ -40,14 +46,19 @@ import org.apache.hadoop.ozone.om.OzoneManager;
 import org.apache.hadoop.ozone.om.exceptions.OMException;
 import org.apache.hadoop.ozone.om.execution.flowcontrol.ExecutionContext;
 import org.apache.hadoop.ozone.om.helpers.BucketLayout;
+import org.apache.hadoop.ozone.om.helpers.BucketVersioningStatus;
 import org.apache.hadoop.ozone.om.helpers.OmBucketInfo;
 import org.apache.hadoop.ozone.om.helpers.OmKeyInfo;
+import org.apache.hadoop.ozone.om.helpers.OmKeyLocationInfoGroup;
 import org.apache.hadoop.ozone.om.request.util.OmResponseUtil;
 import org.apache.hadoop.ozone.om.request.validation.RequestFeatureValidator;
 import org.apache.hadoop.ozone.om.request.validation.ValidationCondition;
 import org.apache.hadoop.ozone.om.request.validation.ValidationContext;
 import org.apache.hadoop.ozone.om.response.OMClientResponse;
+import org.apache.hadoop.ozone.om.response.key.OMKeyDeleteMarkerResponse;
 import org.apache.hadoop.ozone.om.response.key.OMKeyDeleteResponse;
+import org.apache.hadoop.ozone.om.response.key.OMKeyVersionDeleteResponse;
+import org.apache.hadoop.ozone.om.upgrade.OMLayoutFeature;
 import org.apache.hadoop.ozone.protocol.proto.OzoneManagerProtocolProtos;
 import org.apache.hadoop.ozone.protocol.proto.OzoneManagerProtocolProtos.DeleteKeyRequest;
 import org.apache.hadoop.ozone.protocol.proto.OzoneManagerProtocolProtos.DeleteKeyResponse;
@@ -128,6 +139,7 @@ public class OMKeyDeleteRequest extends OMKeyRequest {
     boolean acquiredLock = false;
     OMClientResponse omClientResponse = null;
     Result result = null;
+    boolean visibleKeyRemoved = false;
     long startNanos = Time.monotonicNowNanos();
     try {
       String objectKey =
@@ -140,59 +152,190 @@ public class OMKeyDeleteRequest extends OMKeyRequest {
       // Validate bucket and volume exists or not.
       validateBucketAndVolume(omMetadataManager, volumeName, bucketName);
 
-      OmKeyInfo omKeyInfo =
-          omMetadataManager.getKeyTable(getBucketLayout()).get(objectKey);
-      if (omKeyInfo == null) {
-        throw new OMException("Key not found", KEY_NOT_FOUND);
-      }
-
-      validateIfMatchETag(keyArgs, omKeyInfo);
-
-      // Set the UpdateID to current transactionLogIndex
-      omKeyInfo = omKeyInfo.toBuilder()
-          .setUpdateID(trxnLogIndex)
-          .build();
-
-      // Update table cache. Put a tombstone entry
-      omMetadataManager.getKeyTable(getBucketLayout()).addCacheEntry(
-          new CacheKey<>(
-              omMetadataManager.getOzoneKey(volumeName, bucketName, keyName)),
-          CacheValue.get(trxnLogIndex));
-
       OmBucketInfo omBucketInfo =
           getBucketInfo(omMetadataManager, volumeName, bucketName);
+      OmKeyInfo omKeyInfo =
+          omMetadataManager.getKeyTable(getBucketLayout()).get(objectKey);
+      final Long requestedVersionId =
+          keyArgs.hasVersionId() ? keyArgs.getVersionId() : null;
 
-      long quotaReleased = sumBlockLengths(omKeyInfo);
-      // Empty entries won't be added to deleted table so this key shouldn't get added to snapshotUsed space.
-      boolean isKeyNonEmpty = !OmKeyInfo.isKeyEmpty(omKeyInfo);
-      omBucketInfo.decrUsedBytes(quotaReleased, isKeyNonEmpty);
-      omBucketInfo.decrUsedNamespace(1L, isKeyNonEmpty);
-      OmKeyInfo deletedOpenKeyInfo = null;
-
-      // If omKeyInfo has hsync metadata, delete its corresponding open key as well
-      String dbOpenKey = null;
-      String hsyncClientId = omKeyInfo.getMetadata().get(OzoneConsts.HSYNC_CLIENT_ID);
-      if (hsyncClientId != null) {
-        Table<String, OmKeyInfo> openKeyTable = omMetadataManager.getOpenKeyTable(getBucketLayout());
-        dbOpenKey = omMetadataManager.getOpenKey(volumeName, bucketName, keyName, hsyncClientId);
-        OmKeyInfo openKeyInfo = openKeyTable.get(dbOpenKey);
-        if (openKeyInfo != null) {
-          openKeyInfo = openKeyInfo.withMetadataMutations(
-              metadata -> metadata.put(DELETED_HSYNC_KEY, "true"));
-          openKeyTable.addCacheEntry(dbOpenKey, openKeyInfo, trxnLogIndex);
-          deletedOpenKeyInfo = openKeyInfo;
-        } else {
-          LOG.warn("Potentially inconsistent DB state: open key not found with dbOpenKey '{}'", dbOpenKey);
+      if (requestedVersionId != null) {
+        // S3-compatible versioning: permanently delete the addressed version.
+        // No delete marker is inserted; when the current version is removed,
+        // the newest noncurrent version (if any) becomes current again.
+        if (omBucketInfo.getVersioningStatus() == BucketVersioningStatus.UNVERSIONED) {
+          throw new OMException("Cannot delete a specific version of key " + keyName
+              + ": versioning has never been enabled on bucket " + bucketName,
+              OMException.ResultCodes.INVALID_REQUEST);
         }
-      }
+        boolean deletingCurrent = omKeyInfo != null
+            && (omKeyInfo.getVersionId() != null
+                ? omKeyInfo.getVersionId() == requestedVersionId.longValue()
+                : requestedVersionId == OmKeyInfo.NULL_VERSION_ID);
+        String deletedVersionedKeyName = null;
+        OmKeyInfo versionToDelete;
+        if (deletingCurrent) {
+          versionToDelete = omKeyInfo;
+        } else {
+          deletedVersionedKeyName = omMetadataManager.getVersionedOzoneKey(
+              volumeName, bucketName, keyName, requestedVersionId);
+          versionToDelete =
+              omMetadataManager.getVersionedKeyTable().get(deletedVersionedKeyName);
+          if (versionToDelete == null) {
+            throw new OMException("Version " + requestedVersionId + " of key "
+                + keyName + " not found", KEY_NOT_FOUND);
+          }
+        }
+        versionToDelete = versionToDelete.toBuilder().setUpdateID(trxnLogIndex).build();
 
-      omClientResponse = new OMKeyDeleteResponse(
-          omResponse.setDeleteKeyResponse(DeleteKeyResponse.newBuilder())
-              .build(), omKeyInfo,
-          omBucketInfo.copyObject(), deletedOpenKeyInfo);
-      if (omKeyInfo.isFile()) {
-        auditMap.put(OzoneConsts.DATA_SIZE, String.valueOf(omKeyInfo.getDataSize()));
-        auditMap.put(OzoneConsts.REPLICATION_CONFIG, omKeyInfo.getReplicationConfig().toString());
+        OmKeyInfo promotedKeyInfo = null;
+        String promotedVersionedKeyName = null;
+        if (deletingCurrent) {
+          omMetadataManager.getKeyTable(getBucketLayout()).addCacheEntry(
+              new CacheKey<>(objectKey), CacheValue.get(trxnLogIndex));
+          Pair<String, OmKeyInfo> promoted = getNewestNoncurrentVersion(
+              omMetadataManager, volumeName, bucketName, keyName);
+          if (promoted != null) {
+            promotedVersionedKeyName = promoted.getKey();
+            promotedKeyInfo = promoted.getValue();
+            omMetadataManager.getKeyTable(getBucketLayout()).addCacheEntry(
+                objectKey, promotedKeyInfo, trxnLogIndex);
+            omMetadataManager.getVersionedKeyTable().addCacheEntry(
+                new CacheKey<>(promotedVersionedKeyName), CacheValue.get(trxnLogIndex));
+          }
+        } else {
+          omMetadataManager.getVersionedKeyTable().addCacheEntry(
+              new CacheKey<>(deletedVersionedKeyName), CacheValue.get(trxnLogIndex));
+        }
+
+        long quotaReleased = sumBlockLengths(versionToDelete);
+        boolean isVersionNonEmpty = !OmKeyInfo.isKeyEmpty(versionToDelete);
+        omBucketInfo.decrUsedBytes(quotaReleased, isVersionNonEmpty);
+        omBucketInfo.decrUsedNamespace(1L, isVersionNonEmpty);
+
+        // versions of a key share the objectID, so the deletedTable key is
+        // built with a transaction-unique id to avoid overwriting a pending
+        // deletion of another version of the same key
+        String deleteTableKeyName = omMetadataManager.getOzoneDeletePathKey(
+            ozoneManager.getObjectIdFromTxId(trxnLogIndex), objectKey);
+        visibleKeyRemoved = deletingCurrent && !versionToDelete.isDeleteMarker()
+            && (promotedKeyInfo == null || promotedKeyInfo.isDeleteMarker());
+        omClientResponse = new OMKeyVersionDeleteResponse(
+            omResponse.setDeleteKeyResponse(DeleteKeyResponse.newBuilder()
+                .setDeleteMarker(false)
+                .setVersionId(requestedVersionId)).build(),
+            versionToDelete, objectKey, deletedVersionedKeyName, deleteTableKeyName,
+            promotedKeyInfo, promotedVersionedKeyName, omBucketInfo.copyObject());
+      } else if (omBucketInfo.isS3VersioningEnabled()) {
+        // S3-compatible versioning: a delete without versionId removes no
+        // data; a delete marker becomes the current version and the previous
+        // current version moves to the versionedKeyTable. Like S3, the marker
+        // is inserted even when the key does not exist.
+        long markerVersionId = ozoneManager.getObjectIdFromTxId(trxnLogIndex);
+        OmKeyInfo.Builder markerBuilder;
+        if (omKeyInfo != null) {
+          markerBuilder = omKeyInfo.toBuilder()
+              .setMetadata(new HashMap<>())
+              .setTags(new HashMap<>())
+              .setFileChecksum(null);
+        } else {
+          markerBuilder = new OmKeyInfo.Builder()
+              .setVolumeName(volumeName)
+              .setBucketName(bucketName)
+              .setKeyName(keyName)
+              .setReplicationConfig(RatisReplicationConfig.getInstance(ReplicationFactor.ONE))
+              .setObjectID(markerVersionId)
+              .setOwnerName(omBucketInfo.getOwner());
+        }
+        OmKeyInfo deleteMarker = markerBuilder
+            .setOmKeyLocationInfos(Collections.singletonList(
+                new OmKeyLocationInfoGroup(0, new ArrayList<>())))
+            .setDataSize(0L)
+            .setCreationTime(keyArgs.getModificationTime())
+            .setModificationTime(keyArgs.getModificationTime())
+            .setUpdateID(trxnLogIndex)
+            .setVersionId(markerVersionId)
+            .setDeleteMarker(true)
+            .setNullVersion(false)
+            .setFile(true)
+            .build();
+
+        String movedVersionedKeyName = null;
+        OmKeyInfo movedVersionedKeyInfo = null;
+        if (omKeyInfo != null) {
+          movedVersionedKeyInfo = omKeyInfo.getVersionId() != null ? omKeyInfo
+              : omKeyInfo.toBuilder()
+                  .setVersionId(OmKeyInfo.NULL_VERSION_ID)
+                  .setNullVersion(true)
+                  .build();
+          movedVersionedKeyName = omMetadataManager.getVersionedOzoneKey(
+              volumeName, bucketName, keyName, movedVersionedKeyInfo.getVersionId());
+          omMetadataManager.getVersionedKeyTable().addCacheEntry(
+              movedVersionedKeyName, movedVersionedKeyInfo, trxnLogIndex);
+        }
+
+        checkBucketQuotaInNamespace(omBucketInfo, 1L);
+        omBucketInfo.incrUsedNamespace(1L);
+
+        omMetadataManager.getKeyTable(getBucketLayout()).addCacheEntry(
+            objectKey, deleteMarker, trxnLogIndex);
+
+        visibleKeyRemoved = omKeyInfo != null && !omKeyInfo.isDeleteMarker();
+        omClientResponse = new OMKeyDeleteMarkerResponse(
+            omResponse.setDeleteKeyResponse(DeleteKeyResponse.newBuilder()
+                .setDeleteMarker(true)
+                .setVersionId(markerVersionId)).build(),
+            deleteMarker, objectKey, movedVersionedKeyName, movedVersionedKeyInfo,
+            omBucketInfo.copyObject());
+      } else {
+        if (omKeyInfo == null) {
+          throw new OMException("Key not found", KEY_NOT_FOUND);
+        }
+
+        validateIfMatchETag(keyArgs, omKeyInfo);
+
+        // Set the UpdateID to current transactionLogIndex
+        omKeyInfo = omKeyInfo.toBuilder()
+            .setUpdateID(trxnLogIndex)
+            .build();
+
+        // Update table cache. Put a tombstone entry
+        omMetadataManager.getKeyTable(getBucketLayout()).addCacheEntry(
+            new CacheKey<>(objectKey), CacheValue.get(trxnLogIndex));
+
+        long quotaReleased = sumBlockLengths(omKeyInfo);
+        // Empty entries won't be added to deleted table so this key shouldn't get added to snapshotUsed space.
+        boolean isKeyNonEmpty = !OmKeyInfo.isKeyEmpty(omKeyInfo);
+        omBucketInfo.decrUsedBytes(quotaReleased, isKeyNonEmpty);
+        omBucketInfo.decrUsedNamespace(1L, isKeyNonEmpty);
+        OmKeyInfo deletedOpenKeyInfo = null;
+
+        // If omKeyInfo has hsync metadata, delete its corresponding open key as well
+        String dbOpenKey = null;
+        String hsyncClientId = omKeyInfo.getMetadata().get(OzoneConsts.HSYNC_CLIENT_ID);
+        if (hsyncClientId != null) {
+          Table<String, OmKeyInfo> openKeyTable = omMetadataManager.getOpenKeyTable(getBucketLayout());
+          dbOpenKey = omMetadataManager.getOpenKey(volumeName, bucketName, keyName, hsyncClientId);
+          OmKeyInfo openKeyInfo = openKeyTable.get(dbOpenKey);
+          if (openKeyInfo != null) {
+            openKeyInfo = openKeyInfo.withMetadataMutations(
+                metadata -> metadata.put(DELETED_HSYNC_KEY, "true"));
+            openKeyTable.addCacheEntry(dbOpenKey, openKeyInfo, trxnLogIndex);
+            deletedOpenKeyInfo = openKeyInfo;
+          } else {
+            LOG.warn("Potentially inconsistent DB state: open key not found with dbOpenKey '{}'", dbOpenKey);
+          }
+        }
+
+        visibleKeyRemoved = true;
+        omClientResponse = new OMKeyDeleteResponse(
+            omResponse.setDeleteKeyResponse(DeleteKeyResponse.newBuilder())
+                .build(), omKeyInfo,
+            omBucketInfo.copyObject(), deletedOpenKeyInfo);
+        if (omKeyInfo.isFile()) {
+          auditMap.put(OzoneConsts.DATA_SIZE, String.valueOf(omKeyInfo.getDataSize()));
+          auditMap.put(OzoneConsts.REPLICATION_CONFIG, omKeyInfo.getReplicationConfig().toString());
+        }
       }
 
       result = Result.SUCCESS;
@@ -222,7 +365,9 @@ public class OMKeyDeleteRequest extends OMKeyRequest {
 
     switch (result) {
     case SUCCESS:
-      omMetrics.decNumKeys();
+      if (visibleKeyRemoved) {
+        omMetrics.decNumKeys();
+      }
       LOG.debug("Key deleted. Volume:{}, Bucket:{}, Key:{}", volumeName,
           bucketName, keyName);
       break;
@@ -263,6 +408,26 @@ public class OMKeyDeleteRequest extends OMKeyRequest {
         BucketLayout bucketLayout = ctx.getBucketLayout(
             keyArgs.getVolumeName(), keyArgs.getBucketName());
         bucketLayout.validateSupportedOperation();
+      }
+    }
+    return req;
+  }
+
+  @RequestFeatureValidator(
+      conditions = ValidationCondition.CLUSTER_NEEDS_FINALIZATION,
+      processingPhase = RequestProcessingPhase.PRE_PROCESS,
+      requestType = Type.DeleteKey
+  )
+  public static OMRequest disallowDeleteKeyWithVersionId(
+      OMRequest req, ValidationContext ctx) throws OMException {
+    if (!ctx.versionManager().isAllowed(OMLayoutFeature.OBJECT_VERSIONING)) {
+      if (req.getDeleteKeyRequest().hasKeyArgs()
+          && req.getDeleteKeyRequest().getKeyArgs().hasVersionId()) {
+        throw new OMException("Cluster does not have the object versioning"
+            + " feature finalized yet, but the request contains a versionId."
+            + " Rejecting the request, please finalize the cluster upgrade and"
+            + " then try again.",
+            OMException.ResultCodes.NOT_SUPPORTED_OPERATION_PRIOR_FINALIZATION);
       }
     }
     return req;

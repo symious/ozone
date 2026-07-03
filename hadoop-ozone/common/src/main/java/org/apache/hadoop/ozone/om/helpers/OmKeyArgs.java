@@ -62,6 +62,9 @@ public final class OmKeyArgs extends WithMetadata implements Auditable {
   // been modified.
   private Long expectedDataGeneration = null;
   private final String expectedETag;
+  // S3-compatible object versioning: addresses a specific object version;
+  // null means the current version.
+  private final Long versionId;
 
   private OmKeyArgs(Builder b) {
     super(b);
@@ -84,6 +87,7 @@ public final class OmKeyArgs extends WithMetadata implements Auditable {
     this.tags = b.tags.build();
     this.expectedDataGeneration = b.expectedDataGeneration;
     this.expectedETag = b.expectedETag;
+    this.versionId = b.versionId;
   }
 
   public boolean getIsMultipartKey() {
@@ -170,6 +174,10 @@ public final class OmKeyArgs extends WithMetadata implements Auditable {
     return expectedETag;
   }
 
+  public Long getVersionId() {
+    return versionId;
+  }
+
   @Override
   public Map<String, String> toAuditMap() {
     Map<String, String> auditMap = new LinkedHashMap<>();
@@ -218,6 +226,9 @@ public final class OmKeyArgs extends WithMetadata implements Auditable {
     if (expectedETag != null) {
       builder.setExpectedETag(expectedETag);
     }
+    if (versionId != null) {
+      builder.setVersionId(versionId);
+    }
     return builder.build();
   }
 
@@ -244,6 +255,7 @@ public final class OmKeyArgs extends WithMetadata implements Auditable {
     private final MapBuilder<String, String> tags;
     private Long expectedDataGeneration = null;
     private String expectedETag;
+    private Long versionId;
 
     public Builder() {
       this(AclListBuilder.empty());
@@ -290,6 +302,7 @@ public final class OmKeyArgs extends WithMetadata implements Auditable {
           obj.forceUpdateContainerCacheFromSCM;
       this.expectedDataGeneration = obj.expectedDataGeneration;
       this.expectedETag = obj.expectedETag;
+      this.versionId = obj.versionId;
       this.tags = MapBuilder.of(obj.tags);
       this.acls = AclListBuilder.of(obj.acls);
     }
@@ -362,6 +375,11 @@ public final class OmKeyArgs extends WithMetadata implements Auditable {
 
     public Builder setMultipartUploadPartNumber(int multipartUploadPartNumber) {
       this.multipartUploadPartNumber = multipartUploadPartNumber;
+      return this;
+    }
+
+    public Builder setVersionId(Long versionId) {
+      this.versionId = versionId;
       return this;
     }
 

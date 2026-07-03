@@ -188,6 +188,16 @@ public final class OmBucketInfo extends WithObjectID implements Auditable, CopyO
   }
 
   /**
+   * Whether S3-compatible versioning (versionedKeyTable based) is in effect:
+   * status ENABLED on an OBJECT_STORE bucket. Buckets of other layouts with
+   * the legacy flag keep the legacy in-record block-version behavior.
+   */
+  public boolean isS3VersioningEnabled() {
+    return versioningStatus == BucketVersioningStatus.ENABLED
+        && bucketLayout == BucketLayout.OBJECT_STORE;
+  }
+
+  /**
    * Returns the type of storage to be used.
    * @return StorageType
    */

@@ -38,6 +38,7 @@ import org.apache.hadoop.ozone.om.OzoneManager;
 import org.apache.hadoop.ozone.om.exceptions.OMException;
 import org.apache.hadoop.ozone.om.execution.flowcontrol.ExecutionContext;
 import org.apache.hadoop.ozone.om.helpers.BucketEncryptionKeyInfo;
+import org.apache.hadoop.ozone.om.helpers.BucketLayout;
 import org.apache.hadoop.ozone.om.helpers.BucketVersioningStatus;
 import org.apache.hadoop.ozone.om.helpers.KeyValueUtil;
 import org.apache.hadoop.ozone.om.helpers.OmBucketArgs;
@@ -189,6 +190,17 @@ public class OMBucketSetPropertyRequest extends OMClientRequest {
         }
       }
       if (newVersioningStatus != null) {
+        // S3-compatible versioning is backed by the versionedKeyTable and is
+        // only wired up for the OBJECT_STORE layout; buckets of other layouts
+        // may still toggle the legacy flag (legacy in-record behavior).
+        if (omBucketArgs.getVersioningStatus() != null
+            && newVersioningStatus != BucketVersioningStatus.UNVERSIONED
+            && dbBucketInfo.getBucketLayout() != BucketLayout.OBJECT_STORE) {
+          throw new OMException("Bucket versioning is only supported for"
+              + " OBJECT_STORE layout buckets, but bucket " + bucketName
+              + " has layout " + dbBucketInfo.getBucketLayout(),
+              OMException.ResultCodes.NOT_SUPPORTED_OPERATION);
+        }
         if (!dbBucketInfo.getVersioningStatus().canTransitionTo(newVersioningStatus)) {
           throw new OMException("Bucket versioning cannot be changed from "
               + dbBucketInfo.getVersioningStatus() + " to " + newVersioningStatus
