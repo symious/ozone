@@ -86,6 +86,7 @@ import org.apache.ozone.compaction.log.CompactionLogEntry;
  * |        Column Family |                           Mapping                         |
  * |----------------------------------------------------------------------------------|
  * |             keyTable | /volume/bucket/key                     :- KeyInfo         |
+ * |    versionedKeyTable | /volume/bucket/key/revVersionId        :- KeyInfo         |
  * |         deletedTable | /volume/bucket/key                     :- RepeatedKeyInfo |
  * |         openKeyTable | /volume/bucket/key/id                  :- KeyInfo         |
  * |   multipartInfoTable | /volume/bucket/key/uploadId            :- parts           |
@@ -207,6 +208,19 @@ public final class OMDBDefinition extends DBDefinition.WithMap {
   /** keyTable: /volume/bucket/key :- KeyInfo. */
   public static final DBColumnFamilyDefinition<String, OmKeyInfo> KEY_TABLE_DEF
       = new DBColumnFamilyDefinition<>(KEY_TABLE,
+          StringCodec.get(),
+          OmKeyInfo.getCodec());
+
+  public static final String VERSIONED_KEY_TABLE = "versionedKeyTable";
+  /**
+   * versionedKeyTable: /volume/bucket/key/revVersionId :- KeyInfo.
+   * Noncurrent object versions (including noncurrent delete markers) of
+   * versioning-enabled buckets; the current version stays in keyTable.
+   * revVersionId is the fixed-width hex of (Long.MAX_VALUE - versionId), so
+   * versions of a key are adjacent and ordered newest first.
+   */
+  public static final DBColumnFamilyDefinition<String, OmKeyInfo> VERSIONED_KEY_TABLE_DEF
+      = new DBColumnFamilyDefinition<>(VERSIONED_KEY_TABLE,
           StringCodec.get(),
           OmKeyInfo.getCodec());
 
@@ -350,6 +364,7 @@ public final class OMDBDefinition extends DBDefinition.WithMap {
           TENANT_STATE_TABLE_DEF,
           TRANSACTION_INFO_TABLE_DEF,
           USER_TABLE_DEF,
+          VERSIONED_KEY_TABLE_DEF,
           VOLUME_TABLE_DEF);
 
   private static final OMDBDefinition INSTANCE = new OMDBDefinition();
