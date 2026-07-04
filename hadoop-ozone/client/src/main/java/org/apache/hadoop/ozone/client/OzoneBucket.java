@@ -54,6 +54,7 @@ import org.apache.hadoop.ozone.client.protocol.ClientProtocol;
 import org.apache.hadoop.ozone.om.exceptions.OMException;
 import org.apache.hadoop.ozone.om.helpers.BasicOmKeyInfo;
 import org.apache.hadoop.ozone.om.helpers.BucketLayout;
+import org.apache.hadoop.ozone.om.helpers.BucketVersioningStatus;
 import org.apache.hadoop.ozone.om.helpers.ErrorInfo;
 import org.apache.hadoop.ozone.om.helpers.OmKeyInfo;
 import org.apache.hadoop.ozone.om.helpers.OmMultipartInfo;
@@ -98,6 +99,11 @@ public class OzoneBucket extends WithMetadata {
    * Bucket Version flag.
    */
   private Boolean versioning;
+
+  /**
+   * S3-compatible versioning status of the bucket.
+   */
+  private BucketVersioningStatus versioningStatus;
 
   /**
    * Cache size to be used for listKey calls.
@@ -170,6 +176,7 @@ public class OzoneBucket extends WithMetadata {
         builder.defaultReplicationConfig.getReplicationConfig() : null;
     this.storageType = builder.storageType;
     this.versioning = builder.versioning;
+    this.versioningStatus = builder.versioningStatus;
     if (builder.conf != null) {
       this.listCacheSize = HddsClientUtils.getListCacheSize(builder.conf);
     }
@@ -247,6 +254,15 @@ public class OzoneBucket extends WithMetadata {
    */
   public Boolean getVersioning() {
     return versioning;
+  }
+
+  /**
+   * Returns the S3-compatible versioning status of the bucket
+   * (UNVERSIONED / ENABLED / SUSPENDED); may be null when the server did not
+   * report it.
+   */
+  public BucketVersioningStatus getVersioningStatus() {
+    return versioningStatus;
   }
 
   /**
@@ -366,6 +382,17 @@ public class OzoneBucket extends WithMetadata {
   public void setVersioning(Boolean newVersioning) throws IOException {
     proxy.setBucketVersioning(volumeName, name, newVersioning);
     versioning = newVersioning;
+  }
+
+  /**
+   * Sets the S3-compatible versioning status of the bucket
+   * (ENABLED / SUSPENDED; returning to UNVERSIONED is rejected by the OM).
+   */
+  public void setVersioningStatus(BucketVersioningStatus newStatus)
+      throws IOException {
+    proxy.setBucketVersioningStatus(volumeName, name, newStatus);
+    versioningStatus = newStatus;
+    versioning = newStatus.toVersionEnabledFlag();
   }
 
   /**
@@ -1266,6 +1293,7 @@ public class OzoneBucket extends WithMetadata {
     private DefaultReplicationConfig defaultReplicationConfig;
     private StorageType storageType;
     private Boolean versioning;
+    private BucketVersioningStatus versioningStatus;
     private long usedBytes;
     private long usedNamespace;
     private long creationTime;
@@ -1317,6 +1345,11 @@ public class OzoneBucket extends WithMetadata {
 
     public Builder setVersioning(Boolean versioning) {
       this.versioning = versioning;
+      return this;
+    }
+
+    public Builder setVersioningStatus(BucketVersioningStatus status) {
+      this.versioningStatus = status;
       return this;
     }
 

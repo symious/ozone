@@ -85,6 +85,10 @@ public final class S3Consts {
   public static final String TAG_HEADER = "x-amz-tagging";
   public static final String TAG_DIRECTIVE_HEADER = "x-amz-tagging-directive";
   public static final String TAG_COUNT_HEADER = "x-amz-tagging-count";
+
+  // S3-compatible object versioning headers
+  public static final String VERSION_ID_HEADER = "x-amz-version-id";
+  public static final String DELETE_MARKER_HEADER = "x-amz-delete-marker";
   public static final String AWS_TAG_PREFIX = "aws:";
 
   public static final int TAG_NUM_LIMIT = 10;
@@ -153,6 +157,10 @@ public final class S3Consts {
     public static final String UPLOAD_ID = "uploadId";
     public static final String UPLOAD_ID_MARKER = "upload-id-marker";
     public static final String UPLOADS = "uploads";
+    public static final String VERSIONING = "versioning";
+    public static final String VERSIONS = "versions";
+    public static final String VERSION_ID = "versionId";
+    public static final String VERSION_ID_MARKER = "version-id-marker";
 
     private QueryParams() {
       // no instances

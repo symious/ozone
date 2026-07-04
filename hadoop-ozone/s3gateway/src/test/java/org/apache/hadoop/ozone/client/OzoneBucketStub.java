@@ -56,6 +56,7 @@ import org.apache.hadoop.ozone.client.io.OzoneInputStream;
 import org.apache.hadoop.ozone.client.io.OzoneOutputStream;
 import org.apache.hadoop.ozone.om.exceptions.OMException;
 import org.apache.hadoop.ozone.om.exceptions.OMException.ResultCodes;
+import org.apache.hadoop.ozone.om.helpers.BucketVersioningStatus;
 import org.apache.hadoop.ozone.om.helpers.ErrorInfo;
 import org.apache.hadoop.ozone.om.helpers.OmMultipartInfo;
 import org.apache.hadoop.ozone.om.helpers.OmMultipartUploadCompleteInfo;
@@ -84,6 +85,7 @@ public final class OzoneBucketStub extends OzoneBucket {
 
   private ArrayList<OzoneAcl> aclList = new ArrayList<>();
   private ReplicationConfig replicationConfig;
+  private BucketVersioningStatus versioningStatus;
 
   public static Builder newBuilder() {
     return new Builder();
@@ -92,6 +94,18 @@ public final class OzoneBucketStub extends OzoneBucket {
   private OzoneBucketStub(Builder b) {
     super(b);
     this.replicationConfig = super.getReplicationConfig();
+  }
+
+  // the stub has no client proxy, so the versioning status is kept locally
+
+  @Override
+  public BucketVersioningStatus getVersioningStatus() {
+    return versioningStatus;
+  }
+
+  @Override
+  public void setVersioningStatus(BucketVersioningStatus newStatus) {
+    this.versioningStatus = newStatus;
   }
 
   /**

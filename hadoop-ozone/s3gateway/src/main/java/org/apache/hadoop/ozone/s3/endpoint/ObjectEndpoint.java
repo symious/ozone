@@ -35,12 +35,14 @@ import static org.apache.hadoop.ozone.s3.util.S3Consts.COPY_SOURCE_IF_UNMODIFIED
 import static org.apache.hadoop.ozone.s3.util.S3Consts.CUSTOM_METADATA_COPY_DIRECTIVE_HEADER;
 import static org.apache.hadoop.ozone.s3.util.S3Consts.CopyDirective;
 import static org.apache.hadoop.ozone.s3.util.S3Consts.DECODED_CONTENT_LENGTH_HEADER;
+import static org.apache.hadoop.ozone.s3.util.S3Consts.DELETE_MARKER_HEADER;
 import static org.apache.hadoop.ozone.s3.util.S3Consts.MP_PARTS_COUNT;
 import static org.apache.hadoop.ozone.s3.util.S3Consts.RANGE_HEADER;
 import static org.apache.hadoop.ozone.s3.util.S3Consts.RANGE_HEADER_SUPPORTED_UNIT;
 import static org.apache.hadoop.ozone.s3.util.S3Consts.STORAGE_CLASS_HEADER;
 import static org.apache.hadoop.ozone.s3.util.S3Consts.TAG_COUNT_HEADER;
 import static org.apache.hadoop.ozone.s3.util.S3Consts.TAG_DIRECTIVE_HEADER;
+import static org.apache.hadoop.ozone.s3.util.S3Consts.VERSION_ID_HEADER;
 import static org.apache.hadoop.ozone.s3.util.S3Utils.stripQuotes;
 import static org.apache.hadoop.ozone.s3.util.S3Utils.validateSignatureHeader;
 import static org.apache.hadoop.ozone.s3.util.S3Utils.wrapInQuotes;
@@ -91,6 +93,7 @@ import org.apache.hadoop.ozone.om.OmConfig;
 import org.apache.hadoop.ozone.om.exceptions.OMException;
 import org.apache.hadoop.ozone.om.exceptions.OMException.ResultCodes;
 import org.apache.hadoop.ozone.om.helpers.BucketLayout;
+import org.apache.hadoop.ozone.om.helpers.OmDeleteKeyResult;
 import org.apache.hadoop.ozone.om.helpers.OmMultipartCommitUploadPartInfo;
 import org.apache.hadoop.ozone.om.helpers.OmMultipartInfo;
 import org.apache.hadoop.ozone.om.helpers.OmMultipartUploadCompleteInfo;
@@ -105,6 +108,7 @@ import org.apache.hadoop.ozone.s3.util.S3Consts;
 import org.apache.hadoop.ozone.s3.util.S3Consts.QueryParams;
 import org.apache.hadoop.ozone.s3.util.S3StorageType;
 import org.apache.hadoop.ozone.s3.util.S3Utils;
+import org.apache.hadoop.ozone.s3.util.S3VersionIds;
 import org.apache.hadoop.util.Time;
 import org.apache.http.HttpStatus;
 import org.apache.ratis.util.function.CheckedRunnable;
@@ -372,6 +376,8 @@ public class ObjectEndpoint extends ObjectOperationHandler {
       throws IOException, OS3Exception {
 
     final int partNumber = queryParams().getInt(QueryParams.PART_NUMBER, 0);
+    final Long versionId =
+        S3VersionIds.decode(queryParams().get(QueryParams.VERSION_ID));
 
     final long startNanos = context.getStartNanos();
     final PerformanceStringBuilder perf = context.getPerf();
@@ -383,7 +389,17 @@ public class ObjectEndpoint extends ObjectOperationHandler {
 
       OzoneKeyDetails keyDetails = (partNumber != 0) ?
           getClientProtocol().getS3KeyDetails(bucketName, keyPath, partNumber) :
-          getClientProtocol().getS3KeyDetails(bucketName, keyPath);
+          versionId != null ?
+              getClientProtocol().getS3KeyDetails(bucketName, keyPath, versionId) :
+              getClientProtocol().getS3KeyDetails(bucketName, keyPath);
+
+      if (keyDetails.isDeleteMarker()) {
+        // GET of a delete marker version: 405 with the marker headers
+        return Response.status(Status.METHOD_NOT_ALLOWED)
+            .header(DELETE_MARKER_HEADER, true)
+            .header(VERSION_ID_HEADER, S3VersionIds.encode(keyDetails.getVersionId()))
+            .build();
+      }
 
       isFile(keyPath, keyDetails);
 
@@ -484,6 +500,7 @@ public class ObjectEndpoint extends ObjectOperationHandler {
 
       addLastModifiedDate(responseBuilder, keyDetails);
       addTagCountIfAny(responseBuilder, keyDetails);
+      addVersionIdHeaderIfAny(responseBuilder, keyDetails, versionId != null);
 
       long metadataLatencyNs = getMetrics().updateGetKeyMetadataStats(startNanos);
       perf.appendMetaLatencyNanos(metadataLatencyNs);
@@ -536,6 +553,19 @@ public class ObjectEndpoint extends ObjectOperationHandler {
     }
   }
 
+  /**
+   * Adds the x-amz-version-id response header. The header is set when the
+   * record carries a version identity, or when the request explicitly
+   * addressed a version (the null version is presented as "null").
+   */
+  static void addVersionIdHeaderIfAny(ResponseBuilder responseBuilder,
+      OzoneKey key, boolean versionRequested) {
+    if (key.getVersionId() != null || versionRequested) {
+      responseBuilder.header(VERSION_ID_HEADER,
+          S3VersionIds.encode(key.getVersionId()));
+    }
+  }
+
   static void addEntityTagHeader(ResponseBuilder responseBuilder, OzoneKey key) {
     String eTag = key.getMetadata().get(OzoneConsts.ETAG);
     if (eTag != null) {
@@ -564,12 +594,24 @@ public class ObjectEndpoint extends ObjectOperationHandler {
     S3GAction s3GAction = S3GAction.HEAD_KEY;
 
     OzoneKey key;
+    final Long versionId =
+        S3VersionIds.decode(queryParams().get(QueryParams.VERSION_ID));
     try {
       if (S3Owner.hasBucketOwnershipVerificationConditions(getHeaders())) {
         OzoneBucket bucket = getVolume().getBucket(bucketName);
         S3Owner.verifyBucketOwnerCondition(getHeaders(), bucketName, bucket.getOwner());
       }
-      key = getClientProtocol().headS3Object(bucketName, keyPath);
+      key = getClientProtocol().headS3Object(bucketName, keyPath, versionId);
+
+      if (key.isDeleteMarker()) {
+        // HEAD of a delete marker version: 405 with the marker headers
+        getMetrics().updateHeadKeySuccessStats(startNanos);
+        auditReadSuccess(s3GAction);
+        return Response.status(Status.METHOD_NOT_ALLOWED)
+            .header(DELETE_MARKER_HEADER, true)
+            .header(VERSION_ID_HEADER, S3VersionIds.encode(key.getVersionId()))
+            .build();
+      }
 
       isFile(keyPath, key);
       Response conditionalResponse = S3ConditionalRequest.evaluatePreconditions(
@@ -606,6 +648,7 @@ public class ObjectEndpoint extends ObjectOperationHandler {
 
     addLastModifiedDate(response, key);
     addTagCountIfAny(response, key);
+    addVersionIdHeaderIfAny(response, key, versionId != null);
     addCustomMetadataHeaders(response, key);
     getMetrics().updateHeadKeySuccessStats(startNanos);
     auditReadSuccess(s3GAction);
@@ -654,21 +697,35 @@ public class ObjectEndpoint extends ObjectOperationHandler {
       throws IOException, OS3Exception {
 
     final long startNanos = context.getStartNanos();
+    final Long versionId =
+        S3VersionIds.decode(queryParams().get(QueryParams.VERSION_ID));
     S3ConditionalRequest.DeleteCondition deleteCondition = null;
 
     try {
       OzoneVolume volume = context.getVolume();
       deleteCondition = S3ConditionalRequest.parseDeleteCondition(getHeaders(), keyPath);
 
-      if (!deleteCondition.hasIfMatch()) {
-        getClientProtocol().deleteKey(volume.getName(), context.getBucketName(), keyPath, false);
+      ResponseBuilder responseBuilder = Response.status(Status.NO_CONTENT);
+      if (versionId != null) {
+        // permanent delete of the addressed version
+        getClientProtocol().deleteKey(volume.getName(), context.getBucketName(),
+            keyPath, versionId);
+        responseBuilder.header(VERSION_ID_HEADER, S3VersionIds.encode(versionId));
+      } else if (!deleteCondition.hasIfMatch()) {
+        OmDeleteKeyResult result = getClientProtocol().deleteKey(
+            volume.getName(), context.getBucketName(), keyPath, (Long) null);
+        if (Boolean.TRUE.equals(result.getDeleteMarker())) {
+          responseBuilder
+              .header(DELETE_MARKER_HEADER, true)
+              .header(VERSION_ID_HEADER, S3VersionIds.encode(result.getVersionId()));
+        }
       } else {
         getClientProtocol().deleteKey(volume.getName(), context.getBucketName(), keyPath, false,
             deleteCondition.getExpectedETag());
       }
 
       getMetrics().updateDeleteKeySuccessStats(startNanos);
-      return Response.status(Status.NO_CONTENT).build();
+      return responseBuilder.build();
     } catch (OMException ex) {
       getMetrics().updateDeleteKeyFailureStats(startNanos);
       if (ex.getResult() == ResultCodes.KEY_NOT_FOUND) {

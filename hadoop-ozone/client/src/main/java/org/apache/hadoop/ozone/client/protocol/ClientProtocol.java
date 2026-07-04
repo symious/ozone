@@ -46,9 +46,11 @@ import org.apache.hadoop.ozone.client.io.OzoneInputStream;
 import org.apache.hadoop.ozone.client.io.OzoneOutputStream;
 import org.apache.hadoop.ozone.om.OMConfigKeys;
 import org.apache.hadoop.ozone.om.exceptions.OMException;
+import org.apache.hadoop.ozone.om.helpers.BucketVersioningStatus;
 import org.apache.hadoop.ozone.om.helpers.DeleteTenantState;
 import org.apache.hadoop.ozone.om.helpers.ErrorInfo;
 import org.apache.hadoop.ozone.om.helpers.LeaseKeyInfo;
+import org.apache.hadoop.ozone.om.helpers.OmDeleteKeyResult;
 import org.apache.hadoop.ozone.om.helpers.OmKeyArgs;
 import org.apache.hadoop.ozone.om.helpers.OmKeyInfo;
 import org.apache.hadoop.ozone.om.helpers.OmKeyLocationInfo;
@@ -157,6 +159,13 @@ public interface ClientProtocol {
   OzoneKey headS3Object(String bucketName, String keyName) throws IOException;
 
   /**
+   * HEAD of a specific object version in S3 context (S3-compatible
+   * versioning); null versionId addresses the current version.
+   */
+  OzoneKey headS3Object(String bucketName, String keyName, Long versionId)
+      throws IOException;
+
+  /**
    * Get OzoneKey in S3 context.
    * @param bucketName Name of the Bucket
    * @param keyName Key name
@@ -165,6 +174,13 @@ public interface ClientProtocol {
    */
   OzoneKeyDetails getS3KeyDetails(String bucketName, String keyName)
       throws IOException;
+
+  /**
+   * Get a specific object version in S3 context (S3-compatible versioning);
+   * null versionId addresses the current version.
+   */
+  OzoneKeyDetails getS3KeyDetails(String bucketName, String keyName,
+      Long versionId) throws IOException;
 
   /**
    * Get OzoneKey in S3 context.
@@ -265,6 +281,14 @@ public interface ClientProtocol {
   void setBucketVersioning(String volumeName, String bucketName,
                            Boolean versioning)
       throws IOException;
+
+  /**
+   * Sets the S3-compatible versioning status of a bucket
+   * (ENABLED / SUSPENDED; the transition back to UNVERSIONED is rejected
+   * by the OM).
+   */
+  void setBucketVersioningStatus(String volumeName, String bucketName,
+      BucketVersioningStatus status) throws IOException;
 
   /**
    * Sets the Storage Class of a Bucket.
@@ -554,6 +578,15 @@ public interface ClientProtocol {
   void deleteKey(String volumeName, String bucketName, String keyName,
                  boolean recursive, String expectedETag)
       throws IOException;
+
+  /**
+   * Deletes a key with S3-compatible versioning semantics and returns the
+   * outcome: with a null versionId on a versioning-enabled bucket a delete
+   * marker is inserted; a non-null versionId permanently deletes that
+   * version (the reserved value 0 addresses the "null version").
+   */
+  OmDeleteKeyResult deleteKey(String volumeName, String bucketName,
+      String keyName, Long versionId) throws IOException;
 
   /**
    * Deletes keys through the list.

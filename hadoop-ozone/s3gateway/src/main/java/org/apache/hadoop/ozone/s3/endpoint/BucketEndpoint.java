@@ -423,6 +423,7 @@ public class BucketEndpoint extends BucketOperationHandler {
     BucketOperationHandler chain = BucketOperationHandlerChain.newBuilder(this)
         .add(new BucketGetLocationHandler())
         .add(new BucketAclHandler())
+        .add(new BucketVersioningHandler())
         .add(new ListMultipartUploadsHandler())
         .add(new BucketCrudHandler())
         .add(this)

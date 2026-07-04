@@ -37,6 +37,7 @@ import org.apache.hadoop.ozone.om.helpers.LeaseKeyInfo;
 import org.apache.hadoop.ozone.om.helpers.ListOpenFilesResult;
 import org.apache.hadoop.ozone.om.helpers.OmBucketArgs;
 import org.apache.hadoop.ozone.om.helpers.OmBucketInfo;
+import org.apache.hadoop.ozone.om.helpers.OmDeleteKeyResult;
 import org.apache.hadoop.ozone.om.helpers.OmDeleteKeys;
 import org.apache.hadoop.ozone.om.helpers.OmKeyArgs;
 import org.apache.hadoop.ozone.om.helpers.OmKeyInfo;
@@ -350,6 +351,16 @@ public interface OzoneManagerProtocol
    * @throws IOException
    */
   default void deleteKey(OmKeyArgs args) throws IOException {
+    throw new UnsupportedOperationException("OzoneManager does not require " +
+        "this to be implemented, as write requests use a new approach.");
+  }
+
+  /**
+   * Deletes an existing key like {@link #deleteKey(OmKeyArgs)} and returns
+   * the S3-compatible versioning outcome (delete marker flag and versionId).
+   */
+  default OmDeleteKeyResult deleteKeyWithResult(OmKeyArgs args)
+      throws IOException {
     throw new UnsupportedOperationException("OzoneManager does not require " +
         "this to be implemented, as write requests use a new approach.");
   }

@@ -69,6 +69,7 @@ import org.apache.hadoop.ozone.om.helpers.ListKeysResult;
 import org.apache.hadoop.ozone.om.helpers.ListOpenFilesResult;
 import org.apache.hadoop.ozone.om.helpers.OmBucketArgs;
 import org.apache.hadoop.ozone.om.helpers.OmBucketInfo;
+import org.apache.hadoop.ozone.om.helpers.OmDeleteKeyResult;
 import org.apache.hadoop.ozone.om.helpers.OmDeleteKeys;
 import org.apache.hadoop.ozone.om.helpers.OmKeyArgs;
 import org.apache.hadoop.ozone.om.helpers.OmKeyInfo;
@@ -123,6 +124,7 @@ import org.apache.hadoop.ozone.protocol.proto.OzoneManagerProtocolProtos.DeleteB
 import org.apache.hadoop.ozone.protocol.proto.OzoneManagerProtocolProtos.DeleteBucketTaggingRequest;
 import org.apache.hadoop.ozone.protocol.proto.OzoneManagerProtocolProtos.DeleteKeyArgs;
 import org.apache.hadoop.ozone.protocol.proto.OzoneManagerProtocolProtos.DeleteKeyRequest;
+import org.apache.hadoop.ozone.protocol.proto.OzoneManagerProtocolProtos.DeleteKeyResponse;
 import org.apache.hadoop.ozone.protocol.proto.OzoneManagerProtocolProtos.DeleteKeysRequest;
 import org.apache.hadoop.ozone.protocol.proto.OzoneManagerProtocolProtos.DeleteObjectTaggingRequest;
 import org.apache.hadoop.ozone.protocol.proto.OzoneManagerProtocolProtos.DeleteSnapshotRequest;
@@ -957,6 +959,12 @@ public final class OzoneManagerProtocolClientSideTranslatorPB
    */
   @Override
   public void deleteKey(OmKeyArgs args) throws IOException {
+    deleteKeyWithResult(args);
+  }
+
+  @Override
+  public OmDeleteKeyResult deleteKeyWithResult(OmKeyArgs args)
+      throws IOException {
     DeleteKeyRequest.Builder req = DeleteKeyRequest.newBuilder();
     KeyArgs.Builder keyArgs = KeyArgs.newBuilder()
         .setVolumeName(args.getVolumeName())
@@ -966,14 +974,20 @@ public final class OzoneManagerProtocolClientSideTranslatorPB
     if (args.getExpectedETag() != null) {
       keyArgs.setExpectedETag(args.getExpectedETag());
     }
+    if (args.getVersionId() != null) {
+      keyArgs.setVersionId(args.getVersionId());
+    }
     req.setKeyArgs(keyArgs);
 
     OMRequest omRequest = createOMRequest(Type.DeleteKey)
         .setDeleteKeyRequest(req)
         .build();
 
-    handleError(submitRequest(omRequest));
-
+    OMResponse omResponse = handleError(submitRequest(omRequest));
+    DeleteKeyResponse resp = omResponse.getDeleteKeyResponse();
+    return new OmDeleteKeyResult(
+        resp.hasDeleteMarker() ? resp.getDeleteMarker() : null,
+        resp.hasVersionId() ? resp.getVersionId() : null);
   }
 
   /**

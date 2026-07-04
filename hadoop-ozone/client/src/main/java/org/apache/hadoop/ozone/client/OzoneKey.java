@@ -70,6 +70,14 @@ public class OzoneKey {
    */
   private final boolean isFile;
 
+  /**
+   * S3-compatible object versioning: version identity of this record, null
+   * for keys without one (the "null version"); deleteMarker indicates a
+   * delete marker record without data.
+   */
+  private Long versionId;
+  private boolean deleteMarker;
+
   @SuppressWarnings("parameternumber")
   public OzoneKey(String volumeName, String bucketName,
       String keyName, long size, long creationTime,
@@ -209,6 +217,22 @@ public class OzoneKey {
    * Returns indicator if key is a file.
    * @return file
    */
+  public Long getVersionId() {
+    return versionId;
+  }
+
+  public void setVersionId(Long versionId) {
+    this.versionId = versionId;
+  }
+
+  public boolean isDeleteMarker() {
+    return deleteMarker;
+  }
+
+  public void setDeleteMarker(boolean deleteMarker) {
+    this.deleteMarker = deleteMarker;
+  }
+
   public boolean isFile() {
     return isFile;
   }
@@ -218,11 +242,15 @@ public class OzoneKey {
    *
    */
   public static OzoneKey fromKeyInfo(OmKeyInfo keyInfo) {
-    return new OzoneKey(keyInfo.getVolumeName(), keyInfo.getBucketName(),
+    OzoneKey key = new OzoneKey(keyInfo.getVolumeName(),
+        keyInfo.getBucketName(),
         keyInfo.getKeyName(), keyInfo.getDataSize(), keyInfo.getCreationTime(),
         keyInfo.getModificationTime(), keyInfo.getReplicationConfig(),
         keyInfo.getMetadata(), keyInfo.isFile(), keyInfo.getOwnerName(),
         keyInfo.getTags());
+    key.setVersionId(keyInfo.getVersionId());
+    key.setDeleteMarker(keyInfo.isDeleteMarker());
+    return key;
   }
 
 }

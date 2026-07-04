@@ -130,12 +130,14 @@ import org.apache.hadoop.ozone.om.exceptions.OMException;
 import org.apache.hadoop.ozone.om.helpers.BasicOmKeyInfo;
 import org.apache.hadoop.ozone.om.helpers.BucketEncryptionKeyInfo;
 import org.apache.hadoop.ozone.om.helpers.BucketLayout;
+import org.apache.hadoop.ozone.om.helpers.BucketVersioningStatus;
 import org.apache.hadoop.ozone.om.helpers.DeleteTenantState;
 import org.apache.hadoop.ozone.om.helpers.ErrorInfo;
 import org.apache.hadoop.ozone.om.helpers.KeyInfoWithVolumeContext;
 import org.apache.hadoop.ozone.om.helpers.LeaseKeyInfo;
 import org.apache.hadoop.ozone.om.helpers.OmBucketArgs;
 import org.apache.hadoop.ozone.om.helpers.OmBucketInfo;
+import org.apache.hadoop.ozone.om.helpers.OmDeleteKeyResult;
 import org.apache.hadoop.ozone.om.helpers.OmDeleteKeys;
 import org.apache.hadoop.ozone.om.helpers.OmKeyArgs;
 import org.apache.hadoop.ozone.om.helpers.OmKeyInfo;
@@ -1219,6 +1221,20 @@ public class RpcClient implements ClientProtocol {
   }
 
   @Override
+  public void setBucketVersioningStatus(
+      String volumeName, String bucketName, BucketVersioningStatus status)
+      throws IOException {
+    verifyVolumeName(volumeName);
+    verifyBucketName(bucketName);
+    Objects.requireNonNull(status, "status == null");
+    OmBucketArgs.Builder builder = OmBucketArgs.newBuilder();
+    builder.setVolumeName(volumeName)
+        .setBucketName(bucketName)
+        .setVersioningStatus(status);
+    ozoneManagerClient.setBucketProperty(builder.build());
+  }
+
+  @Override
   public void setBucketStorageType(
       String volumeName, String bucketName, StorageType storageType)
       throws IOException {
@@ -1324,6 +1340,7 @@ public class RpcClient implements ClientProtocol {
         .setName(bucketInfo.getBucketName())
         .setStorageType(bucketInfo.getStorageType())
         .setVersioning(bucketInfo.getIsVersionEnabled())
+        .setVersioningStatus(bucketInfo.getVersioningStatus())
         .setCreationTime(bucketInfo.getCreationTime())
         .setModificationTime(bucketInfo.getModificationTime())
         .setMetadata(bucketInfo.getMetadata())
@@ -1357,6 +1374,7 @@ public class RpcClient implements ClientProtocol {
                 .setName(bucket.getBucketName())
                 .setStorageType(bucket.getStorageType())
                 .setVersioning(bucket.getIsVersionEnabled())
+                .setVersioningStatus(bucket.getVersioningStatus())
                 .setCreationTime(bucket.getCreationTime())
                 .setModificationTime(bucket.getModificationTime())
                 .setMetadata(bucket.getMetadata())
@@ -1728,6 +1746,22 @@ public class RpcClient implements ClientProtocol {
   }
 
   @Override
+  public OmDeleteKeyResult deleteKey(
+      String volumeName, String bucketName, String keyName, Long versionId)
+      throws IOException {
+    verifyVolumeName(volumeName);
+    verifyBucketName(bucketName);
+    Objects.requireNonNull(keyName, "keyName == null");
+    OmKeyArgs keyArgs = new OmKeyArgs.Builder()
+        .setVolumeName(volumeName)
+        .setBucketName(bucketName)
+        .setKeyName(keyName)
+        .setVersionId(versionId)
+        .build();
+    return ozoneManagerClient.deleteKeyWithResult(keyArgs);
+  }
+
+  @Override
   public void deleteKeys(
           String volumeName, String bucketName, List<String> keyNameList)
           throws IOException {
@@ -1843,7 +1877,8 @@ public class RpcClient implements ClientProtocol {
       lastKeyOffset += info.getLength();
     }
 
-    return new OzoneKeyDetails(keyInfo.getVolumeName(), keyInfo.getBucketName(),
+    OzoneKeyDetails keyDetails = new OzoneKeyDetails(
+        keyInfo.getVolumeName(), keyInfo.getBucketName(),
         keyInfo.getKeyName(), keyInfo.getDataSize(), keyInfo.getCreationTime(),
         keyInfo.getModificationTime(), ozoneKeyLocations,
         keyInfo.getReplicationConfig(), keyInfo.getMetadata(),
@@ -1852,12 +1887,22 @@ public class RpcClient implements ClientProtocol {
         keyInfo.getOwnerName(), keyInfo.getTags(),
         keyInfo.getGeneration()
     );
+    keyDetails.setVersionId(keyInfo.getVersionId());
+    keyDetails.setDeleteMarker(keyInfo.isDeleteMarker());
+    return keyDetails;
   }
 
   @Override
   public OzoneKeyDetails getS3KeyDetails(String bucketName, String keyName)
       throws IOException {
-    OmKeyInfo keyInfo = getS3KeyInfo(bucketName, keyName, false);
+    OmKeyInfo keyInfo = getS3KeyInfo(bucketName, keyName, false, null);
+    return getOzoneKeyDetails(keyInfo);
+  }
+
+  @Override
+  public OzoneKeyDetails getS3KeyDetails(String bucketName, String keyName,
+      Long versionId) throws IOException {
+    OmKeyInfo keyInfo = getS3KeyInfo(bucketName, keyName, false, versionId);
     return getOzoneKeyDetails(keyInfo);
   }
 
@@ -1868,7 +1913,7 @@ public class RpcClient implements ClientProtocol {
     if (omVersion.compareTo(OzoneManagerVersion.S3_PART_AWARE_GET) >= 0) {
       keyInfo = getS3PartKeyInfo(bucketName, keyName, partNumber);
     } else {
-      keyInfo = getS3KeyInfo(bucketName, keyName, false);
+      keyInfo = getS3KeyInfo(bucketName, keyName, false, null);
       List<OmKeyLocationInfo> filteredKeyLocationInfo = keyInfo
           .getLatestVersionLocations().getBlocksLatestVersionOnly().stream()
           .filter(omKeyLocationInfo -> omKeyLocationInfo.getPartNumber() ==
@@ -1884,7 +1929,8 @@ public class RpcClient implements ClientProtocol {
 
   @Nonnull
   private OmKeyInfo getS3KeyInfo(
-      String bucketName, String keyName, boolean isHeadOp) throws IOException {
+      String bucketName, String keyName, boolean isHeadOp, Long versionId)
+      throws IOException {
     verifyBucketName(bucketName);
     Objects.requireNonNull(keyName, "keyName == null");
 
@@ -1898,6 +1944,7 @@ public class RpcClient implements ClientProtocol {
         .setLatestVersionLocation(getLatestVersionLocation)
         .setForceUpdateContainerCacheFromSCM(false)
         .setHeadOp(isHeadOp)
+        .setVersionId(versionId)
         .build();
     KeyInfoWithVolumeContext keyInfoWithS3Context =
         ozoneManagerClient.getKeyInfo(keyArgs, true);
@@ -2768,7 +2815,13 @@ public class RpcClient implements ClientProtocol {
   @Override
   public OzoneKey headS3Object(String bucketName, String keyName)
       throws IOException {
-    OmKeyInfo keyInfo = getS3KeyInfo(bucketName, keyName, true);
+    return headS3Object(bucketName, keyName, null);
+  }
+
+  @Override
+  public OzoneKey headS3Object(String bucketName, String keyName,
+      Long versionId) throws IOException {
+    OmKeyInfo keyInfo = getS3KeyInfo(bucketName, keyName, true, versionId);
     return OzoneKey.fromKeyInfo(keyInfo);
   }
 

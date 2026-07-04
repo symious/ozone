@@ -37,9 +37,11 @@ import org.apache.hadoop.ozone.client.io.OzoneDataStreamOutput;
 import org.apache.hadoop.ozone.client.io.OzoneInputStream;
 import org.apache.hadoop.ozone.client.io.OzoneOutputStream;
 import org.apache.hadoop.ozone.client.protocol.ClientProtocol;
+import org.apache.hadoop.ozone.om.helpers.BucketVersioningStatus;
 import org.apache.hadoop.ozone.om.helpers.DeleteTenantState;
 import org.apache.hadoop.ozone.om.helpers.ErrorInfo;
 import org.apache.hadoop.ozone.om.helpers.LeaseKeyInfo;
+import org.apache.hadoop.ozone.om.helpers.OmDeleteKeyResult;
 import org.apache.hadoop.ozone.om.helpers.OmKeyArgs;
 import org.apache.hadoop.ozone.om.helpers.OmKeyInfo;
 import org.apache.hadoop.ozone.om.helpers.OmKeyLocationInfo;
@@ -121,9 +123,23 @@ public class ClientProtocolStub implements ClientProtocol {
   }
 
   @Override
+  public OzoneKey headS3Object(String bucketName, String keyName,
+      Long versionId) throws IOException {
+    // the stub does not model object versions
+    return headS3Object(bucketName, keyName);
+  }
+
+  @Override
   public OzoneKeyDetails getS3KeyDetails(String bucketName, String keyName)
       throws IOException {
     return objectStoreStub.getS3Volume().getBucket(bucketName).getKey(keyName);
+  }
+
+  @Override
+  public OzoneKeyDetails getS3KeyDetails(String bucketName, String keyName,
+      Long versionId) throws IOException {
+    // the stub does not model object versions
+    return getS3KeyDetails(bucketName, keyName);
   }
 
   @Override
@@ -178,6 +194,12 @@ public class ClientProtocolStub implements ClientProtocol {
   public void setBucketVersioning(String volumeName, String bucketName,
                                   Boolean versioning) throws IOException {
 
+  }
+
+  @Override
+  public void setBucketVersioningStatus(String volumeName, String bucketName,
+      BucketVersioningStatus status) throws IOException {
+    // the OzoneBucket updates its local status after this call succeeds
   }
 
   @Override
@@ -311,6 +333,14 @@ public class ClientProtocolStub implements ClientProtocol {
   public void deleteKey(String volumeName, String bucketName, String keyName,
                         boolean recursive) throws IOException {
     getBucket(volumeName, bucketName).deleteKey(keyName);
+  }
+
+  @Override
+  public OmDeleteKeyResult deleteKey(String volumeName, String bucketName,
+      String keyName, Long versionId) throws IOException {
+    // the stub does not model object versions
+    getBucket(volumeName, bucketName).deleteKey(keyName);
+    return new OmDeleteKeyResult(null, null);
   }
 
   @Override
