@@ -71,6 +71,7 @@ import org.apache.hadoop.ozone.OzoneConsts;
 import org.apache.hadoop.ozone.om.OMMetadataManager;
 import org.apache.hadoop.ozone.om.OMMetrics;
 import org.apache.hadoop.ozone.om.OmConfig;
+import org.apache.hadoop.ozone.om.OmMetadataManagerImpl;
 import org.apache.hadoop.ozone.om.OzoneManager;
 import org.apache.hadoop.ozone.om.PrefixManager;
 import org.apache.hadoop.ozone.om.ResolvedBucket;
@@ -963,21 +964,10 @@ public abstract class OMKeyRequest extends OMClientRequest {
   }
 
   /**
-   * Whether {@code dbKey} is a versionedKeyTable entry of exactly the key the
-   * prefix was built for: the remainder must be one fixed-width (16 hex chars)
-   * versionId suffix, since key names may themselves contain the separator.
+   * See {@link OmMetadataManagerImpl#isVersionedDbKeyOf(String, String)}.
    */
   protected static boolean isVersionedDbKeyOf(String dbKey, String prefix) {
-    if (!dbKey.startsWith(prefix) || dbKey.length() != prefix.length() + 16) {
-      return false;
-    }
-    for (int i = prefix.length(); i < dbKey.length(); i++) {
-      char c = dbKey.charAt(i);
-      if ((c < '0' || c > '9') && (c < 'a' || c > 'f')) {
-        return false;
-      }
-    }
-    return true;
+    return OmMetadataManagerImpl.isVersionedDbKeyOf(dbKey, prefix);
   }
 
   /**

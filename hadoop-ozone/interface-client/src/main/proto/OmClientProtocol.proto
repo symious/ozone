@@ -162,6 +162,8 @@ enum Type {
   PutBucketTagging = 144;
   GetBucketTagging = 145;
   DeleteBucketTagging = 146;
+
+  ListObjectVersions = 147;
 }
 
 enum SafeMode {
@@ -321,6 +323,8 @@ message OMRequest {
   optional GetBucketTaggingRequest          getBucketTaggingRequest          = 146;
   // TODO: DeleteBucketTagging — clears tags on target bucket (link resolves in OM).
   optional DeleteBucketTaggingRequest       deleteBucketTaggingRequest       = 147;
+
+  optional ListObjectVersionsRequest        listObjectVersionsRequest        = 148;
 }
 
 message OMResponse {
@@ -463,6 +467,8 @@ message OMResponse {
   optional GetBucketTaggingResponse          getBucketTaggingResponse      = 145;
   // TODO: Empty ack after OM clears BucketInfo.tags.
   optional DeleteBucketTaggingResponse       deleteBucketTaggingResponse    = 146;
+
+  optional ListObjectVersionsResponse        listObjectVersionsResponse    = 147;
 }
 
 enum Status {
@@ -1614,6 +1620,27 @@ message ListKeysResponse {
 message ListKeysLightResponse {
     repeated BasicKeyInfo basicKeyInfo = 1;
     optional bool isTruncated = 2;
+}
+
+// S3-compatible ListObjectVersions: lists all versions of keys (current and
+// noncurrent, including delete markers) ordered by key, newest version first.
+message ListObjectVersionsRequest {
+    required string volumeName = 1;
+    required string bucketName = 2;
+    optional string prefix = 3;
+    optional string keyMarker = 4;
+    // resume inside keyMarker after this version; the reserved value 0
+    // addresses the null version
+    optional uint64 versionIdMarker = 5;
+    optional int32 maxKeys = 6;
+}
+
+message ListObjectVersionsResponse {
+    // each entry carries versionId / isDeleteMarker / isNullVersion
+    repeated KeyInfo versions = 1;
+    optional bool isTruncated = 2;
+    optional string nextKeyMarker = 3;
+    optional uint64 nextVersionIdMarker = 4;
 }
 
 message CommitKeyRequest {

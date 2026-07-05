@@ -66,6 +66,7 @@ import org.apache.hadoop.ozone.om.helpers.KeyValueUtil;
 import org.apache.hadoop.ozone.om.helpers.LeaseKeyInfo;
 import org.apache.hadoop.ozone.om.helpers.ListKeysLightResult;
 import org.apache.hadoop.ozone.om.helpers.ListKeysResult;
+import org.apache.hadoop.ozone.om.helpers.ListObjectVersionsResult;
 import org.apache.hadoop.ozone.om.helpers.ListOpenFilesResult;
 import org.apache.hadoop.ozone.om.helpers.OmBucketArgs;
 import org.apache.hadoop.ozone.om.helpers.OmBucketInfo;
@@ -164,6 +165,8 @@ import org.apache.hadoop.ozone.protocol.proto.OzoneManagerProtocolProtos.ListKey
 import org.apache.hadoop.ozone.protocol.proto.OzoneManagerProtocolProtos.ListKeysResponse;
 import org.apache.hadoop.ozone.protocol.proto.OzoneManagerProtocolProtos.ListMultipartUploadsRequest;
 import org.apache.hadoop.ozone.protocol.proto.OzoneManagerProtocolProtos.ListMultipartUploadsResponse;
+import org.apache.hadoop.ozone.protocol.proto.OzoneManagerProtocolProtos.ListObjectVersionsRequest;
+import org.apache.hadoop.ozone.protocol.proto.OzoneManagerProtocolProtos.ListObjectVersionsResponse;
 import org.apache.hadoop.ozone.protocol.proto.OzoneManagerProtocolProtos.ListOpenFilesRequest;
 import org.apache.hadoop.ozone.protocol.proto.OzoneManagerProtocolProtos.ListOpenFilesResponse;
 import org.apache.hadoop.ozone.protocol.proto.OzoneManagerProtocolProtos.ListStatusLightResponse;
@@ -1086,6 +1089,43 @@ public final class OzoneManagerProtocolClientSideTranslatorPB
     keys.addAll(list);
     return new ListKeysResult(keys, resp.getIsTruncated());
 
+  }
+
+  /**
+   * S3-compatible ListObjectVersions.
+   */
+  @Override
+  public ListObjectVersionsResult listObjectVersions(String volumeName,
+      String bucketName, String keyPrefix, String keyMarker,
+      Long versionIdMarker, int maxKeys) throws IOException {
+    ListObjectVersionsRequest.Builder reqBuilder =
+        ListObjectVersionsRequest.newBuilder()
+            .setVolumeName(volumeName)
+            .setBucketName(bucketName)
+            .setMaxKeys(maxKeys);
+    if (keyPrefix != null) {
+      reqBuilder.setPrefix(keyPrefix);
+    }
+    if (keyMarker != null) {
+      reqBuilder.setKeyMarker(keyMarker);
+    }
+    if (versionIdMarker != null) {
+      reqBuilder.setVersionIdMarker(versionIdMarker);
+    }
+
+    OMRequest omRequest = createOMRequest(Type.ListObjectVersions)
+        .setListObjectVersionsRequest(reqBuilder.build())
+        .build();
+
+    ListObjectVersionsResponse resp =
+        handleError(submitRequest(omRequest)).getListObjectVersionsResponse();
+    List<OmKeyInfo> versions = new ArrayList<>();
+    for (OzoneManagerProtocolProtos.KeyInfo keyInfo : resp.getVersionsList()) {
+      versions.add(OmKeyInfo.getFromProtobuf(keyInfo));
+    }
+    return new ListObjectVersionsResult(versions, resp.getIsTruncated(),
+        resp.hasNextKeyMarker() ? resp.getNextKeyMarker() : null,
+        resp.getNextVersionIdMarker());
   }
 
   /**

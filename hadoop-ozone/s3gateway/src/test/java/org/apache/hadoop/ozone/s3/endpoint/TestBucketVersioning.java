@@ -112,4 +112,18 @@ public class TestBucketVersioning {
     assertErrorResponse(S3ErrorTable.INVALID_ARGUMENT,
         () -> bucketEndpoint.put(BUCKET_NAME, body("<Status>Maybe</Status>")));
   }
+
+  @Test
+  public void listObjectVersionsReturnsEmptyResultOnStub() throws Exception {
+    bucketEndpoint.queryParamsForTest().unset(QueryParams.VERSIONING);
+    bucketEndpoint.queryParamsForTest().set(QueryParams.VERSIONS, "");
+
+    Response response = bucketEndpoint.get(BUCKET_NAME);
+
+    assertEquals(200, response.getStatus());
+    ListVersionsResponse listing = (ListVersionsResponse) response.getEntity();
+    assertEquals(BUCKET_NAME, listing.getName());
+    assertEquals(0, listing.getVersions().size());
+    assertEquals(0, listing.getDeleteMarkers().size());
+  }
 }

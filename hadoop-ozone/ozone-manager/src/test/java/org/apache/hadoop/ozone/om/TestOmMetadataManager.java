@@ -85,6 +85,7 @@ import org.apache.hadoop.ozone.om.codec.OMDBDefinition;
 import org.apache.hadoop.ozone.om.exceptions.OMException;
 import org.apache.hadoop.ozone.om.exceptions.OMException.ResultCodes;
 import org.apache.hadoop.ozone.om.helpers.BucketLayout;
+import org.apache.hadoop.ozone.om.helpers.ListObjectVersionsResult;
 import org.apache.hadoop.ozone.om.helpers.ListOpenFilesResult;
 import org.apache.hadoop.ozone.om.helpers.OmBucketInfo;
 import org.apache.hadoop.ozone.om.helpers.OmKeyInfo;
@@ -409,6 +410,86 @@ public class TestOmMetadataManager {
     omMetadataManager.getBucketTable().addCacheEntry(
         new CacheKey<>(omMetadataManager.getBucketKey(volumeName, bucketName)),
         CacheValue.get(1, omBucketInfo));
+  }
+
+  @Test
+  public void testListObjectVersions() throws Exception {
+    String volumeName = "vol-versions";
+    String bucketName = "bucket-versions";
+    OMRequestTestUtils.addVolumeToDB(volumeName, omMetadataManager);
+    addBucketsToCache(volumeName, bucketName);
+
+    // key-a: current v300, noncurrent v200 and a null version in slot 0
+    putVersionedKey(volumeName, bucketName, "key-a", 300L, false, true);
+    putVersionedKey(volumeName, bucketName, "key-a", 200L, false, false);
+    putVersionedKey(volumeName, bucketName, "key-a",
+        OmKeyInfo.NULL_VERSION_ID, false, false);
+    // key-b: only a current delete marker
+    putVersionedKey(volumeName, bucketName, "key-b", 400L, true, true);
+
+    // full listing: ordered by key, newest first within a key
+    ListObjectVersionsResult full = omMetadataManager.listObjectVersions(
+        volumeName, bucketName, "", null, null, 1000);
+    assertFalse(full.isTruncated());
+    assertEquals(4, full.getVersions().size());
+    assertVersionEntry(full.getVersions().get(0), "key-a", 300L, false);
+    assertVersionEntry(full.getVersions().get(1), "key-a", 200L, false);
+    assertVersionEntry(full.getVersions().get(2), "key-a",
+        OmKeyInfo.NULL_VERSION_ID, false);
+    assertVersionEntry(full.getVersions().get(3), "key-b", 400L, true);
+
+    // pagination: first page of 2 entries, truncated inside key-a
+    ListObjectVersionsResult page1 = omMetadataManager.listObjectVersions(
+        volumeName, bucketName, "", null, null, 2);
+    assertTrue(page1.isTruncated());
+    assertEquals(2, page1.getVersions().size());
+    assertEquals("key-a", page1.getNextKeyMarker());
+    assertEquals(200L, page1.getNextVersionIdMarker());
+
+    // resume with the returned markers: the remaining entries
+    ListObjectVersionsResult page2 = omMetadataManager.listObjectVersions(
+        volumeName, bucketName, "", page1.getNextKeyMarker(),
+        page1.getNextVersionIdMarker(), 1000);
+    assertFalse(page2.isTruncated());
+    assertEquals(2, page2.getVersions().size());
+    assertVersionEntry(page2.getVersions().get(0), "key-a",
+        OmKeyInfo.NULL_VERSION_ID, false);
+    assertVersionEntry(page2.getVersions().get(1), "key-b", 400L, true);
+
+    // prefix filter
+    ListObjectVersionsResult prefixed = omMetadataManager.listObjectVersions(
+        volumeName, bucketName, "key-b", null, null, 1000);
+    assertEquals(1, prefixed.getVersions().size());
+    assertVersionEntry(prefixed.getVersions().get(0), "key-b", 400L, true);
+  }
+
+  private void putVersionedKey(String volumeName, String bucketName,
+      String keyName, long versionId, boolean deleteMarker, boolean current)
+      throws Exception {
+    OmKeyInfo keyInfo = OMRequestTestUtils.createOmKeyInfo(
+            volumeName, bucketName, keyName,
+            RatisReplicationConfig.getInstance(ONE))
+        .setVersionId(versionId)
+        .setDeleteMarker(deleteMarker)
+        .setNullVersion(versionId == OmKeyInfo.NULL_VERSION_ID)
+        .build();
+    if (current) {
+      omMetadataManager.getKeyTable(BucketLayout.OBJECT_STORE).put(
+          omMetadataManager.getOzoneKey(volumeName, bucketName, keyName),
+          keyInfo);
+    } else {
+      omMetadataManager.getVersionedKeyTable().put(
+          omMetadataManager.getVersionedOzoneKey(
+              volumeName, bucketName, keyName, versionId),
+          keyInfo);
+    }
+  }
+
+  private static void assertVersionEntry(OmKeyInfo entry, String keyName,
+      long versionSlot, boolean deleteMarker) {
+    assertEquals(keyName, entry.getKeyName());
+    assertEquals(versionSlot, entry.getVersionSlot());
+    assertEquals(deleteMarker, entry.isDeleteMarker());
   }
 
   @Test

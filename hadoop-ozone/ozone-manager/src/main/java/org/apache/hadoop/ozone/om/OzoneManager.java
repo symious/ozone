@@ -257,6 +257,7 @@ import org.apache.hadoop.ozone.om.helpers.KeyInfoWithVolumeContext;
 import org.apache.hadoop.ozone.om.helpers.LeaseKeyInfo;
 import org.apache.hadoop.ozone.om.helpers.ListKeysLightResult;
 import org.apache.hadoop.ozone.om.helpers.ListKeysResult;
+import org.apache.hadoop.ozone.om.helpers.ListObjectVersionsResult;
 import org.apache.hadoop.ozone.om.helpers.ListOpenFilesResult;
 import org.apache.hadoop.ozone.om.helpers.OMNodeDetails;
 import org.apache.hadoop.ozone.om.helpers.OmBucketArgs;
@@ -3118,6 +3119,19 @@ public final class OzoneManager extends ServiceRuntimeInfoImpl
       return rcReader.get().listKeys(
           volumeName, bucketName, startKey, keyPrefix, maxKeys);
     }
+  }
+
+  /**
+   * S3-compatible ListObjectVersions over the keyTable and the
+   * versionedKeyTable.
+   */
+  public ListObjectVersionsResult listObjectVersions(String volumeName,
+      String bucketName, String keyPrefix, String keyMarker,
+      Long versionIdMarker, int maxKeys) throws IOException {
+    ResolvedBucket bucket =
+        resolveBucketLink(Pair.of(volumeName, bucketName));
+    return metadataManager.listObjectVersions(bucket.realVolume(),
+        bucket.realBucket(), keyPrefix, keyMarker, versionIdMarker, maxKeys);
   }
 
   @Override

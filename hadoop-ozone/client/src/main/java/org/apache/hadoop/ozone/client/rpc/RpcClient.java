@@ -135,6 +135,7 @@ import org.apache.hadoop.ozone.om.helpers.DeleteTenantState;
 import org.apache.hadoop.ozone.om.helpers.ErrorInfo;
 import org.apache.hadoop.ozone.om.helpers.KeyInfoWithVolumeContext;
 import org.apache.hadoop.ozone.om.helpers.LeaseKeyInfo;
+import org.apache.hadoop.ozone.om.helpers.ListObjectVersionsResult;
 import org.apache.hadoop.ozone.om.helpers.OmBucketArgs;
 import org.apache.hadoop.ozone.om.helpers.OmBucketInfo;
 import org.apache.hadoop.ozone.om.helpers.OmDeleteKeyResult;
@@ -1743,6 +1744,16 @@ public class RpcClient implements ClientProtocol {
       keyArgs.setExpectedETag(expectedETag);
     }
     ozoneManagerClient.deleteKey(keyArgs.build());
+  }
+
+  @Override
+  public ListObjectVersionsResult listObjectVersions(String volumeName,
+      String bucketName, String keyPrefix, String keyMarker,
+      Long versionIdMarker, int maxKeys) throws IOException {
+    verifyVolumeName(volumeName);
+    verifyBucketName(bucketName);
+    return ozoneManagerClient.listObjectVersions(volumeName, bucketName,
+        keyPrefix, keyMarker, versionIdMarker, maxKeys);
   }
 
   @Override

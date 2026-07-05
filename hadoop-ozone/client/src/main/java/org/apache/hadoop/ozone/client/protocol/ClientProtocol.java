@@ -50,6 +50,7 @@ import org.apache.hadoop.ozone.om.helpers.BucketVersioningStatus;
 import org.apache.hadoop.ozone.om.helpers.DeleteTenantState;
 import org.apache.hadoop.ozone.om.helpers.ErrorInfo;
 import org.apache.hadoop.ozone.om.helpers.LeaseKeyInfo;
+import org.apache.hadoop.ozone.om.helpers.ListObjectVersionsResult;
 import org.apache.hadoop.ozone.om.helpers.OmDeleteKeyResult;
 import org.apache.hadoop.ozone.om.helpers.OmKeyArgs;
 import org.apache.hadoop.ozone.om.helpers.OmKeyInfo;
@@ -587,6 +588,15 @@ public interface ClientProtocol {
    */
   OmDeleteKeyResult deleteKey(String volumeName, String bucketName,
       String keyName, Long versionId) throws IOException;
+
+  /**
+   * S3-compatible ListObjectVersions: all versions of keys (current and
+   * noncurrent, including delete markers) ordered by key name and, within a
+   * key, newest first.
+   */
+  ListObjectVersionsResult listObjectVersions(String volumeName,
+      String bucketName, String keyPrefix, String keyMarker,
+      Long versionIdMarker, int maxKeys) throws IOException;
 
   /**
    * Deletes keys through the list.

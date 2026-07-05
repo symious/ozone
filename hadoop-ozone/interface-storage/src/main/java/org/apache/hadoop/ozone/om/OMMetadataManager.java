@@ -40,6 +40,7 @@ import org.apache.hadoop.hdds.utils.db.cache.CacheValue;
 import org.apache.hadoop.ozone.common.BlockGroup;
 import org.apache.hadoop.ozone.om.helpers.BucketLayout;
 import org.apache.hadoop.ozone.om.helpers.ListKeysResult;
+import org.apache.hadoop.ozone.om.helpers.ListObjectVersionsResult;
 import org.apache.hadoop.ozone.om.helpers.ListOpenFilesResult;
 import org.apache.hadoop.ozone.om.helpers.OmBucketInfo;
 import org.apache.hadoop.ozone.om.helpers.OmDBAccessIdInfo;
@@ -322,6 +323,21 @@ public interface OMMetadataManager extends DBStoreHAManager, AutoCloseable {
                           String bucketName, String startKey, String keyPrefix,
                           int maxKeys)
       throws IOException;
+
+  /**
+   * S3-compatible ListObjectVersions: returns all versions of keys (current
+   * and noncurrent, including delete markers) in the given bucket, ordered by
+   * key name and, within a key, newest first.
+   *
+   * @param keyMarker resume listing after this key; when versionIdMarker is
+   * also given, resume inside this key after that version.
+   * @param versionIdMarker version slot within keyMarker to resume after;
+   * null when absent (the reserved value 0 addresses the null version).
+   * @param maxKeys maximum number of version entries to return.
+   */
+  ListObjectVersionsResult listObjectVersions(String volumeName,
+      String bucketName, String keyPrefix, String keyMarker,
+      Long versionIdMarker, int maxKeys) throws IOException;
 
   /**
    * Returns snapshot info for volume/bucket snapshot path.

@@ -72,6 +72,7 @@ import org.apache.hadoop.ozone.om.helpers.KeyInfoWithVolumeContext;
 import org.apache.hadoop.ozone.om.helpers.KeyValueUtil;
 import org.apache.hadoop.ozone.om.helpers.ListKeysLightResult;
 import org.apache.hadoop.ozone.om.helpers.ListKeysResult;
+import org.apache.hadoop.ozone.om.helpers.ListObjectVersionsResult;
 import org.apache.hadoop.ozone.om.helpers.ListOpenFilesResult;
 import org.apache.hadoop.ozone.om.helpers.OMAuditLogger;
 import org.apache.hadoop.ozone.om.helpers.OmBucketArgs;
@@ -130,6 +131,8 @@ import org.apache.hadoop.ozone.protocol.proto.OzoneManagerProtocolProtos.ListBuc
 import org.apache.hadoop.ozone.protocol.proto.OzoneManagerProtocolProtos.ListKeysLightResponse;
 import org.apache.hadoop.ozone.protocol.proto.OzoneManagerProtocolProtos.ListKeysRequest;
 import org.apache.hadoop.ozone.protocol.proto.OzoneManagerProtocolProtos.ListKeysResponse;
+import org.apache.hadoop.ozone.protocol.proto.OzoneManagerProtocolProtos.ListObjectVersionsRequest;
+import org.apache.hadoop.ozone.protocol.proto.OzoneManagerProtocolProtos.ListObjectVersionsResponse;
 import org.apache.hadoop.ozone.protocol.proto.OzoneManagerProtocolProtos.ListOpenFilesRequest;
 import org.apache.hadoop.ozone.protocol.proto.OzoneManagerProtocolProtos.ListOpenFilesResponse;
 import org.apache.hadoop.ozone.protocol.proto.OzoneManagerProtocolProtos.ListSnapshotDiffJobRequest;
@@ -240,6 +243,10 @@ public class OzoneManagerRequestHandler implements RequestHandler {
         ListKeysLightResponse listKeysLightResponse = listKeysLight(
             request.getListKeysRequest());
         responseBuilder.setListKeysLightResponse(listKeysLightResponse);
+        break;
+      case ListObjectVersions:
+        responseBuilder.setListObjectVersionsResponse(listObjectVersions(
+            request.getListObjectVersionsRequest(), request.getVersion()));
         break;
       case ListMultiPartUploadParts:
         MultipartUploadListPartsResponse listPartsResponse =
@@ -768,6 +775,29 @@ public class OzoneManagerRequestHandler implements RequestHandler {
       resp.addKeyInfo(key.getProtobuf(true, clientVersion));
     }
     resp.setIsTruncated(listKeysResult.isTruncated());
+    return resp.build();
+  }
+
+  private ListObjectVersionsResponse listObjectVersions(
+      ListObjectVersionsRequest request, int clientVersion) throws IOException {
+    ListObjectVersionsResult result = impl.listObjectVersions(
+        request.getVolumeName(),
+        request.getBucketName(),
+        request.getPrefix(),
+        request.getKeyMarker(),
+        request.hasVersionIdMarker() ? request.getVersionIdMarker() : null,
+        limitListSizeInt(request.getMaxKeys()));
+
+    ListObjectVersionsResponse.Builder resp =
+        ListObjectVersionsResponse.newBuilder();
+    for (OmKeyInfo version : result.getVersions()) {
+      resp.addVersions(version.getProtobuf(true, clientVersion));
+    }
+    resp.setIsTruncated(result.isTruncated());
+    if (result.getNextKeyMarker() != null) {
+      resp.setNextKeyMarker(result.getNextKeyMarker());
+      resp.setNextVersionIdMarker(result.getNextVersionIdMarker());
+    }
     return resp.build();
   }
 

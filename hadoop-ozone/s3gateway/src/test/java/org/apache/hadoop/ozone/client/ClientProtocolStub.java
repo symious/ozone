@@ -20,6 +20,7 @@ package org.apache.hadoop.ozone.client;
 import jakarta.annotation.Nonnull;
 import java.io.IOException;
 import java.net.URI;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -41,6 +42,7 @@ import org.apache.hadoop.ozone.om.helpers.BucketVersioningStatus;
 import org.apache.hadoop.ozone.om.helpers.DeleteTenantState;
 import org.apache.hadoop.ozone.om.helpers.ErrorInfo;
 import org.apache.hadoop.ozone.om.helpers.LeaseKeyInfo;
+import org.apache.hadoop.ozone.om.helpers.ListObjectVersionsResult;
 import org.apache.hadoop.ozone.om.helpers.OmDeleteKeyResult;
 import org.apache.hadoop.ozone.om.helpers.OmKeyArgs;
 import org.apache.hadoop.ozone.om.helpers.OmKeyInfo;
@@ -341,6 +343,14 @@ public class ClientProtocolStub implements ClientProtocol {
     // the stub does not model object versions
     getBucket(volumeName, bucketName).deleteKey(keyName);
     return new OmDeleteKeyResult(null, null);
+  }
+
+  @Override
+  public ListObjectVersionsResult listObjectVersions(String volumeName,
+      String bucketName, String keyPrefix, String keyMarker,
+      Long versionIdMarker, int maxKeys) throws IOException {
+    // the stub does not model object versions
+    return new ListObjectVersionsResult(new ArrayList<>(), false, null, 0);
   }
 
   @Override

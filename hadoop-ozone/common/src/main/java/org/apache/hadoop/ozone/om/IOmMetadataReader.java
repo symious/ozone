@@ -25,6 +25,7 @@ import org.apache.hadoop.ozone.om.exceptions.OMException;
 import org.apache.hadoop.ozone.om.helpers.KeyInfoWithVolumeContext;
 import org.apache.hadoop.ozone.om.helpers.ListKeysLightResult;
 import org.apache.hadoop.ozone.om.helpers.ListKeysResult;
+import org.apache.hadoop.ozone.om.helpers.ListObjectVersionsResult;
 import org.apache.hadoop.ozone.om.helpers.OmBucketArgs;
 import org.apache.hadoop.ozone.om.helpers.OmKeyArgs;
 import org.apache.hadoop.ozone.om.helpers.OmKeyInfo;
@@ -135,6 +136,19 @@ public interface IOmMetadataReader {
   ListKeysResult listKeys(String volumeName, String bucketName,
                           String startKey, String keyPrefix, int maxKeys)
       throws IOException;
+
+  /**
+   * S3-compatible ListObjectVersions: all versions of keys (current and
+   * noncurrent, including delete markers) ordered by key name and, within a
+   * key, newest first. See
+   * OMMetadataManager#listObjectVersions for parameter semantics.
+   */
+  default ListObjectVersionsResult listObjectVersions(String volumeName,
+      String bucketName, String keyPrefix, String keyMarker,
+      Long versionIdMarker, int maxKeys) throws IOException {
+    throw new UnsupportedOperationException(
+        "listObjectVersions is not supported by this reader.");
+  }
 
   /**
    * Lightweight listKeys implementation.

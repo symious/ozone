@@ -65,6 +65,7 @@ import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.NavigableMap;
 import java.util.NoSuchElementException;
 import java.util.Objects;
 import java.util.Set;
@@ -99,6 +100,7 @@ import org.apache.hadoop.ozone.om.exceptions.OMException;
 import org.apache.hadoop.ozone.om.exceptions.OMException.ResultCodes;
 import org.apache.hadoop.ozone.om.helpers.BucketLayout;
 import org.apache.hadoop.ozone.om.helpers.ListKeysResult;
+import org.apache.hadoop.ozone.om.helpers.ListObjectVersionsResult;
 import org.apache.hadoop.ozone.om.helpers.ListOpenFilesResult;
 import org.apache.hadoop.ozone.om.helpers.OmBucketInfo;
 import org.apache.hadoop.ozone.om.helpers.OmDBAccessIdInfo;
@@ -665,6 +667,134 @@ public class OmMetadataManagerImpl implements OMMetadataManager,
   @Override
   public String getVersionedOzoneKeyPrefix(String volume, String bucket, String key) {
     return getOzoneKey(volume, bucket, key) + OM_KEY_PREFIX;
+  }
+
+  /**
+   * Whether {@code dbKey} is a versionedKeyTable entry of exactly the key the
+   * prefix was built for: the remainder must be one fixed-width (16 hex chars)
+   * versionId suffix, since key names may themselves contain the separator.
+   */
+  public static boolean isVersionedDbKeyOf(String dbKey, String prefix) {
+    if (!dbKey.startsWith(prefix) || dbKey.length() != prefix.length() + 16) {
+      return false;
+    }
+    for (int i = prefix.length(); i < dbKey.length(); i++) {
+      char c = dbKey.charAt(i);
+      if ((c < '0' || c > '9') && (c < 'a' || c > 'f')) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  /**
+   * All noncurrent versions of the given key from the versionedKeyTable,
+   * merging the table cache (entries of transactions not yet flushed,
+   * including tombstones) with the DB, ordered newest first.
+   */
+  private NavigableMap<String, OmKeyInfo> getNoncurrentVersions(
+      String volumeName, String bucketName, String keyName) throws IOException {
+    final String prefix =
+        getVersionedOzoneKeyPrefix(volumeName, bucketName, keyName);
+    final TreeMap<String, OmKeyInfo> merged = new TreeMap<>();
+    final Set<String> tombstoned = new HashSet<>();
+
+    Iterator<Map.Entry<CacheKey<String>, CacheValue<OmKeyInfo>>> cacheIter =
+        versionedKeyTable.cacheIterator();
+    while (cacheIter.hasNext()) {
+      Map.Entry<CacheKey<String>, CacheValue<OmKeyInfo>> entry = cacheIter.next();
+      String dbKey = entry.getKey().getCacheKey();
+      if (!isVersionedDbKeyOf(dbKey, prefix)) {
+        continue;
+      }
+      OmKeyInfo value = entry.getValue().getCacheValue();
+      if (value == null) {
+        tombstoned.add(dbKey);
+      } else {
+        merged.put(dbKey, value);
+      }
+    }
+    try (TableIterator<String, ? extends KeyValue<String, OmKeyInfo>>
+             iter = versionedKeyTable.iterator(prefix)) {
+      while (iter.hasNext()) {
+        KeyValue<String, OmKeyInfo> kv = iter.next();
+        String dbKey = kv.getKey();
+        if (!isVersionedDbKeyOf(dbKey, prefix)) {
+          continue;
+        }
+        if (!tombstoned.contains(dbKey)) {
+          merged.putIfAbsent(dbKey, kv.getValue());
+        }
+      }
+    }
+    return merged;
+  }
+
+  @Override
+  public ListObjectVersionsResult listObjectVersions(String volumeName,
+      String bucketName, String keyPrefix, String keyMarker,
+      Long versionIdMarker, int maxKeys) throws IOException {
+    final List<OmKeyInfo> versions = new ArrayList<>();
+    if (maxKeys <= 0) {
+      return new ListObjectVersionsResult(versions, false, null, 0);
+    }
+    // an entry that does not fit any more marks the result as truncated; the
+    // next markers point at the last included entry
+    boolean truncated = false;
+    OmKeyInfo lastIncluded = null;
+
+    // resume inside keyMarker after versionIdMarker: the remaining noncurrent
+    // versions of keyMarker come first
+    if (StringUtils.isNotBlank(keyMarker) && versionIdMarker != null) {
+      String resumeAfter = getVersionedOzoneKey(
+          volumeName, bucketName, keyMarker, versionIdMarker);
+      for (OmKeyInfo version : getNoncurrentVersions(volumeName, bucketName, keyMarker)
+          .tailMap(resumeAfter, false).values()) {
+        if (versions.size() >= maxKeys) {
+          truncated = true;
+          break;
+        }
+        versions.add(version);
+        lastIncluded = version;
+      }
+    }
+
+    // page over current keys (cache-merged) and expand each into its versions
+    String startAfter = StringUtils.isNotBlank(keyMarker) ? keyMarker : null;
+    outer:
+    while (!truncated) {
+      ListKeysResult currents = listKeys(volumeName, bucketName, startAfter,
+          keyPrefix, Math.min(maxKeys, 1000));
+      if (currents.getKeys().isEmpty()) {
+        break;
+      }
+      for (OmKeyInfo current : currents.getKeys()) {
+        String currentKeyName = current.getKeyName();
+        startAfter = currentKeyName;
+        if (versions.size() >= maxKeys) {
+          truncated = true;
+          break outer;
+        }
+        versions.add(current);
+        lastIncluded = current;
+        for (OmKeyInfo version
+            : getNoncurrentVersions(volumeName, bucketName, currentKeyName).values()) {
+          if (versions.size() >= maxKeys) {
+            truncated = true;
+            break outer;
+          }
+          versions.add(version);
+          lastIncluded = version;
+        }
+      }
+      if (!currents.isTruncated()) {
+        break;
+      }
+    }
+
+    return new ListObjectVersionsResult(versions, truncated,
+        truncated ? lastIncluded.getKeyName() : null,
+        truncated ? lastIncluded.getVersionSlot() : 0);
   }
 
   @Override
