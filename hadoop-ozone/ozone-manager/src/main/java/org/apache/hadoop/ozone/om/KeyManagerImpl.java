@@ -682,9 +682,7 @@ public class KeyManagerImpl implements KeyManager {
       }
       return current;
     }
-    if (current != null && (current.getVersionId() != null
-        ? current.getVersionId().longValue() == versionId.longValue()
-        : versionId.longValue() == OmKeyInfo.NULL_VERSION_ID)) {
+    if (current != null && current.matchesVersionId(versionId)) {
       return current;
     }
     return metadataManager.getVersionedKeyTable().get(

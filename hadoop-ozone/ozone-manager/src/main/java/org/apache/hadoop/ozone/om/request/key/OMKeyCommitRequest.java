@@ -34,6 +34,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import org.apache.commons.lang3.tuple.Pair;
+import org.apache.hadoop.hdds.utils.db.cache.CacheKey;
+import org.apache.hadoop.hdds.utils.db.cache.CacheValue;
 import org.apache.hadoop.ozone.OmUtils;
 import org.apache.hadoop.ozone.OzoneConsts;
 import org.apache.hadoop.ozone.OzoneManagerVersion;
@@ -308,21 +310,35 @@ public class OMKeyCommitRequest extends OMKeyRequest {
       // Combination
       // Set the UpdateID to current transactionLogIndex
       final boolean s3Versioning = omBucketInfo.isS3VersioningEnabled();
+      final boolean s3Suspended = omBucketInfo.isS3VersioningSuspended();
       OmKeyInfo.Builder committedKeyBuilder = omKeyInfo.toBuilder()
           .setExpectedDataGeneration(null)
           .addAllMetadata(KeyValueUtil.getFromProtobuf(
                 commitKeyArgs.getMetadataList()))
           .setUpdateID(trxnLogIndex)
           .setDataSize(commitKeyArgs.getDataSize());
-      if (s3Versioning) {
+      if (s3Versioning || s3Suspended) {
         // The version identity is assigned once when the version is created
         // and stays frozen afterwards: an hsync re-commit of the same open
-        // key keeps the versionId of the version it is updating.
-        committedKeyBuilder.setVersionId(isSameHsyncKey
-            ? keyToDelete.getVersionId()
-            : ozoneManager.getObjectIdFromTxId(trxnLogIndex));
+        // key keeps the identity of the version it is updating. A write on a
+        // suspended bucket creates/replaces the key's single null version.
+        if (isSameHsyncKey) {
+          committedKeyBuilder.setVersionId(keyToDelete.getVersionId())
+              .setNullVersion(keyToDelete.isNullVersion());
+        } else {
+          committedKeyBuilder
+              .setVersionId(ozoneManager.getObjectIdFromTxId(trxnLogIndex))
+              .setNullVersion(s3Suspended);
+        }
       }
       omKeyInfo = committedKeyBuilder.build();
+
+      // The overwritten current version is retained (moved to the
+      // versionedKeyTable) when versioning is enabled, or when a
+      // suspended-mode write overwrites a real version; a suspended write
+      // replacing the null version deletes the old data instead.
+      final boolean retainOverwrittenCurrent = keyToDelete != null && !isSameHsyncKey
+          && (s3Versioning || (s3Suspended && !keyToDelete.isNullVersionRecord()));
 
       // Update the block length for each block, return the allocated but
       // uncommitted blocks
@@ -337,7 +353,8 @@ public class OMKeyCommitRequest extends OMKeyRequest {
         correctedSpace -= keyToDelete.getReplicatedSize();
         checkBucketQuotaInBytes(omMetadataManager, omBucketInfo,
             correctedSpace);
-      } else if (keyToDelete != null && !omBucketInfo.getIsVersionEnabled()) {
+      } else if (keyToDelete != null && !omBucketInfo.getIsVersionEnabled()
+          && !retainOverwrittenCurrent) {
         RepeatedOmKeyInfo oldVerKeyInfo = getOldVersionsToCleanUp(
             keyToDelete, omBucketInfo.getObjectID(), trxnLogIndex);
         // using pseudoObjId as objectId can be same in case of overwrite key
@@ -419,16 +436,42 @@ public class OMKeyCommitRequest extends OMKeyRequest {
       // reserved NULL_VERSION_ID slot.
       String dbVersionedKey = null;
       OmKeyInfo versionedKeyInfo = null;
-      if (s3Versioning && keyToDelete != null && !isSameHsyncKey) {
-        versionedKeyInfo = keyToDelete.getVersionId() != null ? keyToDelete
-            : keyToDelete.toBuilder()
+      String purgedVersionedKey = null;
+      if (retainOverwrittenCurrent) {
+        versionedKeyInfo = keyToDelete.isNullVersionRecord()
+            ? keyToDelete.toBuilder()
                 .setVersionId(OmKeyInfo.NULL_VERSION_ID)
                 .setNullVersion(true)
-                .build();
+                .build()
+            : keyToDelete;
         dbVersionedKey = omMetadataManager.getVersionedOzoneKey(
-            volumeName, bucketName, keyName, versionedKeyInfo.getVersionId());
+            volumeName, bucketName, keyName, versionedKeyInfo.getVersionSlot());
         omMetadataManager.getVersionedKeyTable().addCacheEntry(
             dbVersionedKey, versionedKeyInfo, trxnLogIndex);
+
+        if (s3Suspended) {
+          // the new current is now the key's single null version: an old
+          // null version parked in the versionedKeyTable is permanently
+          // replaced
+          String nullSlotKey = omMetadataManager.getVersionedOzoneKey(
+              volumeName, bucketName, keyName, OmKeyInfo.NULL_VERSION_ID);
+          OmKeyInfo oldNullVersion =
+              omMetadataManager.getVersionedKeyTable().get(nullSlotKey);
+          if (oldNullVersion != null) {
+            oldNullVersion = oldNullVersion.toBuilder()
+                .setUpdateID(trxnLogIndex).build();
+            oldKeyVersionsToDeleteMap = addKeyInfoToDeleteMap(ozoneManager,
+                trxnLogIndex, dbOzoneKey, omBucketInfo.getObjectID(),
+                oldNullVersion, oldKeyVersionsToDeleteMap);
+            omMetadataManager.getVersionedKeyTable().addCacheEntry(
+                new CacheKey<>(nullSlotKey), CacheValue.get(trxnLogIndex));
+            boolean nullVersionNonEmpty = !OmKeyInfo.isKeyEmpty(oldNullVersion);
+            omBucketInfo.decrUsedBytes(sumBlockLengths(oldNullVersion),
+                nullVersionNonEmpty);
+            omBucketInfo.decrUsedNamespace(1L, nullVersionNonEmpty);
+            purgedVersionedKey = nullSlotKey;
+          }
+        }
       }
 
       omMetadataManager.getKeyTable(getBucketLayout()).addCacheEntry(
@@ -439,7 +482,8 @@ public class OMKeyCommitRequest extends OMKeyRequest {
       omClientResponse = new OMKeyCommitResponse(omResponse.build(),
           omKeyInfo, dbOzoneKey, dbOpenKey, omBucketInfo.copyObject(),
           oldKeyVersionsToDeleteMap, isHSync, newOpenKeyInfo, dbOpenKeyToDeleteKey, openKeyToDelete)
-          .withVersionedKey(dbVersionedKey, versionedKeyInfo);
+          .withVersionedKey(dbVersionedKey, versionedKeyInfo)
+          .withDeletedVersionedKey(purgedVersionedKey);
 
       result = Result.SUCCESS;
     } catch (IOException | InvalidPathException ex) {

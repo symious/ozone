@@ -1889,6 +1889,7 @@ public class RpcClient implements ClientProtocol {
     );
     keyDetails.setVersionId(keyInfo.getVersionId());
     keyDetails.setDeleteMarker(keyInfo.isDeleteMarker());
+    keyDetails.setNullVersion(keyInfo.isNullVersionRecord());
     return keyDetails;
   }
 

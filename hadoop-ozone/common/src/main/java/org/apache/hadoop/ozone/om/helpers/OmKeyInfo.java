@@ -480,6 +480,35 @@ public final class OmKeyInfo extends WithParentObjectId
     return isNullVersion;
   }
 
+  /**
+   * Whether this record occupies the "null version" slot of the key: either
+   * explicitly flagged (written while versioning was suspended), or a record
+   * that predates versioning support.
+   */
+  public boolean isNullVersionRecord() {
+    return isNullVersion || versionId == null;
+  }
+
+  /**
+   * Whether this record is the version addressed by {@code requested}.
+   * The null version is addressed by the reserved {@link #NULL_VERSION_ID}
+   * regardless of the internal versionId the record carries.
+   */
+  public boolean matchesVersionId(long requested) {
+    if (isNullVersionRecord()) {
+      return requested == NULL_VERSION_ID;
+    }
+    return versionId == requested;
+  }
+
+  /**
+   * The versionedKeyTable slot of this record: the reserved
+   * {@link #NULL_VERSION_ID} for the null version, the versionId otherwise.
+   */
+  public long getVersionSlot() {
+    return isNullVersionRecord() ? NULL_VERSION_ID : versionId;
+  }
+
   @Override
   public String toString() {
     return "OmKeyInfo{" +

@@ -562,7 +562,7 @@ public class ObjectEndpoint extends ObjectOperationHandler {
       OzoneKey key, boolean versionRequested) {
     if (key.getVersionId() != null || versionRequested) {
       responseBuilder.header(VERSION_ID_HEADER,
-          S3VersionIds.encode(key.getVersionId()));
+          S3VersionIds.encode(key.isNullVersion() ? null : key.getVersionId()));
     }
   }
 

@@ -54,6 +54,7 @@ public class OMKeyCommitResponse extends OmKeyResponse {
   private String openKeyNameToUpdate;
   private String versionedKeyName;
   private OmKeyInfo versionedKeyInfo;
+  private String deletedVersionedKeyName;
 
   @SuppressWarnings("checkstyle:ParameterNumber")
   public OMKeyCommitResponse(
@@ -96,6 +97,16 @@ public class OMKeyCommitResponse extends OmKeyResponse {
     return this;
   }
 
+  /**
+   * versionedKeyTable entry to remove: the old null version replaced by a
+   * write on a bucket with suspended versioning (its blocks are already in
+   * the keys-to-delete map).
+   */
+  public OMKeyCommitResponse withDeletedVersionedKey(String dbVersionedKey) {
+    this.deletedVersionedKeyName = dbVersionedKey;
+    return this;
+  }
+
   @Override
   public void addToDBBatch(OMMetadataManager omMetadataManager,
       BatchOperation batchOperation) throws IOException {
@@ -115,6 +126,10 @@ public class OMKeyCommitResponse extends OmKeyResponse {
     if (versionedKeyInfo != null) {
       omMetadataManager.getVersionedKeyTable()
           .putWithBatch(batchOperation, versionedKeyName, versionedKeyInfo);
+    }
+    if (deletedVersionedKeyName != null) {
+      omMetadataManager.getVersionedKeyTable()
+          .deleteWithBatch(batchOperation, deletedVersionedKeyName);
     }
 
     updateDeletedTable(omMetadataManager, batchOperation);

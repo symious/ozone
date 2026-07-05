@@ -198,6 +198,16 @@ public final class OmBucketInfo extends WithObjectID implements Auditable, CopyO
   }
 
   /**
+   * Whether S3-compatible versioning is suspended on this bucket: writes and
+   * deletes operate on the single "null version" slot while versions
+   * accumulated earlier are retained.
+   */
+  public boolean isS3VersioningSuspended() {
+    return versioningStatus == BucketVersioningStatus.SUSPENDED
+        && bucketLayout == BucketLayout.OBJECT_STORE;
+  }
+
+  /**
    * Returns the type of storage to be used.
    * @return StorageType
    */

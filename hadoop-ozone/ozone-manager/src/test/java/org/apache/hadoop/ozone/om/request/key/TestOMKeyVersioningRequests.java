@@ -53,13 +53,21 @@ public class TestOMKeyVersioningRequests extends TestOMKeyRequest {
   }
 
   private void setupVersionedBucket() throws Exception {
+    setupBucket(BucketVersioningStatus.ENABLED);
+  }
+
+  private void setupSuspendedBucket() throws Exception {
+    setupBucket(BucketVersioningStatus.SUSPENDED);
+  }
+
+  private void setupBucket(BucketVersioningStatus status) throws Exception {
     OMRequestTestUtils.addVolumeToDB(volumeName, omMetadataManager);
     OMRequestTestUtils.addBucketToDB(omMetadataManager,
         OmBucketInfo.newBuilder()
             .setVolumeName(volumeName)
             .setBucketName(bucketName)
             .setBucketLayout(BucketLayout.OBJECT_STORE)
-            .setVersioningStatus(BucketVersioningStatus.ENABLED));
+            .setVersioningStatus(status));
     // versionId assignment derives from the transaction index; the mocked
     // OzoneManager would otherwise return 0, which is the reserved
     // NULL_VERSION_ID
@@ -69,10 +77,16 @@ public class TestOMKeyVersioningRequests extends TestOMKeyRequest {
 
   private String seedCurrentVersion(Long versionId, boolean deleteMarker)
       throws Exception {
+    return seedCurrentVersion(versionId, deleteMarker, false);
+  }
+
+  private String seedCurrentVersion(Long versionId, boolean deleteMarker,
+      boolean nullVersion) throws Exception {
     OmKeyInfo keyInfo = OMRequestTestUtils.createOmKeyInfo(
             volumeName, bucketName, keyName, replicationConfig)
         .setVersionId(versionId)
         .setDeleteMarker(deleteMarker)
+        .setNullVersion(nullVersion)
         .build();
     String ozoneKey = omMetadataManager.getOzoneKey(
         volumeName, bucketName, keyName);
@@ -84,6 +98,7 @@ public class TestOMKeyVersioningRequests extends TestOMKeyRequest {
     OmKeyInfo keyInfo = OMRequestTestUtils.createOmKeyInfo(
             volumeName, bucketName, keyName, replicationConfig)
         .setVersionId(versionId)
+        .setNullVersion(versionId == OmKeyInfo.NULL_VERSION_ID)
         .build();
     String dbKey = omMetadataManager.getVersionedOzoneKey(
         volumeName, bucketName, keyName, versionId);
@@ -287,6 +302,148 @@ public class TestOMKeyVersioningRequests extends TestOMKeyRequest {
         getBucketLayout()).validateAndUpdateCache(ozoneManager, 300L);
     assertEquals(OzoneManagerProtocolProtos.Status.INVALID_REQUEST,
         response.getOMResponse().getStatus());
+  }
+
+  @Test
+  public void testSuspendedPutReplacesNullVersion() throws Exception {
+    setupSuspendedBucket();
+    // record that predates versioning is the null version; a suspended-mode
+    // write replaces it instead of retaining it
+    String ozoneKey = seedCurrentVersion(null, false);
+    OMRequestTestUtils.addKeyToTable(true, volumeName, bucketName, keyName,
+        clientID, replicationConfig, omMetadataManager);
+
+    OMClientResponse response = new OMKeyCommitRequest(commitRequest(),
+        getBucketLayout()).validateAndUpdateCache(ozoneManager, 500L);
+    assertEquals(OzoneManagerProtocolProtos.Status.OK,
+        response.getOMResponse().getStatus());
+
+    OmKeyInfo current =
+        omMetadataManager.getKeyTable(getBucketLayout()).get(ozoneKey);
+    assertEquals(500L, current.getVersionId());
+    assertTrue(current.isNullVersion());
+
+    assertNull(omMetadataManager.getVersionedKeyTable().get(
+        omMetadataManager.getVersionedOzoneKey(
+            volumeName, bucketName, keyName, OmKeyInfo.NULL_VERSION_ID)));
+  }
+
+  @Test
+  public void testSuspendedPutRetainsRealVersionAndPurgesParkedNullVersion()
+      throws Exception {
+    setupSuspendedBucket();
+    String ozoneKey = seedCurrentVersion(200L, false);
+    String parkedNullSlot = seedNoncurrentVersion(OmKeyInfo.NULL_VERSION_ID);
+    OMRequestTestUtils.addKeyToTable(true, volumeName, bucketName, keyName,
+        clientID, replicationConfig, omMetadataManager);
+
+    OMClientResponse response = new OMKeyCommitRequest(commitRequest(),
+        getBucketLayout()).validateAndUpdateCache(ozoneManager, 500L);
+    assertEquals(OzoneManagerProtocolProtos.Status.OK,
+        response.getOMResponse().getStatus());
+
+    // the new current is the null version
+    OmKeyInfo current =
+        omMetadataManager.getKeyTable(getBucketLayout()).get(ozoneKey);
+    assertTrue(current.isNullVersion());
+
+    // the overwritten real version is retained
+    OmKeyInfo retained = omMetadataManager.getVersionedKeyTable().get(
+        omMetadataManager.getVersionedOzoneKey(
+            volumeName, bucketName, keyName, 200L));
+    assertNotNull(retained);
+    assertEquals(200L, retained.getVersionId());
+
+    // the old parked null version is permanently replaced
+    assertNull(omMetadataManager.getVersionedKeyTable().get(parkedNullSlot));
+    assertNotNull(((org.apache.hadoop.ozone.om.response.key.OMKeyCommitResponse)
+        response).getKeysToDelete());
+  }
+
+  @Test
+  public void testSuspendedDeleteInsertsNullMarkerAndRetainsRealVersion()
+      throws Exception {
+    setupSuspendedBucket();
+    String ozoneKey = seedCurrentVersion(100L, false);
+
+    OMClientResponse response = new OMKeyDeleteRequest(deleteRequest(null),
+        getBucketLayout()).validateAndUpdateCache(ozoneManager, 300L);
+    assertEquals(OzoneManagerProtocolProtos.Status.OK,
+        response.getOMResponse().getStatus());
+    assertTrue(response.getOMResponse().getDeleteKeyResponse().getDeleteMarker());
+    // the null marker is presented as the "null" version externally
+    assertEquals(OmKeyInfo.NULL_VERSION_ID,
+        response.getOMResponse().getDeleteKeyResponse().getVersionId());
+
+    OmKeyInfo current =
+        omMetadataManager.getKeyTable(getBucketLayout()).get(ozoneKey);
+    assertTrue(current.isDeleteMarker());
+    assertTrue(current.isNullVersion());
+
+    assertNotNull(omMetadataManager.getVersionedKeyTable().get(
+        omMetadataManager.getVersionedOzoneKey(
+            volumeName, bucketName, keyName, 100L)));
+  }
+
+  @Test
+  public void testSuspendedDeleteReplacesNullCurrentWithoutRetaining()
+      throws Exception {
+    setupSuspendedBucket();
+    String ozoneKey = seedCurrentVersion(null, false);
+
+    OMClientResponse response = new OMKeyDeleteRequest(deleteRequest(null),
+        getBucketLayout()).validateAndUpdateCache(ozoneManager, 300L);
+    assertEquals(OzoneManagerProtocolProtos.Status.OK,
+        response.getOMResponse().getStatus());
+
+    OmKeyInfo current =
+        omMetadataManager.getKeyTable(getBucketLayout()).get(ozoneKey);
+    assertTrue(current.isDeleteMarker());
+    assertTrue(current.isNullVersion());
+
+    // the replaced null version is not retained
+    assertNull(omMetadataManager.getVersionedKeyTable().get(
+        omMetadataManager.getVersionedOzoneKey(
+            volumeName, bucketName, keyName, OmKeyInfo.NULL_VERSION_ID)));
+  }
+
+  @Test
+  public void testEnabledPutMovesSuspendedEraCurrentToNullSlot()
+      throws Exception {
+    setupVersionedBucket();
+    // current version was written while versioning was suspended: it carries
+    // an internal versionId but occupies the null slot
+    seedCurrentVersion(300L, false, true);
+    OMRequestTestUtils.addKeyToTable(true, volumeName, bucketName, keyName,
+        clientID, replicationConfig, omMetadataManager);
+
+    OMClientResponse response = new OMKeyCommitRequest(commitRequest(),
+        getBucketLayout()).validateAndUpdateCache(ozoneManager, 500L);
+    assertEquals(OzoneManagerProtocolProtos.Status.OK,
+        response.getOMResponse().getStatus());
+
+    OmKeyInfo nullVersion = omMetadataManager.getVersionedKeyTable().get(
+        omMetadataManager.getVersionedOzoneKey(
+            volumeName, bucketName, keyName, OmKeyInfo.NULL_VERSION_ID));
+    assertNotNull(nullVersion);
+    assertTrue(nullVersion.isNullVersion());
+    assertEquals(OmKeyInfo.NULL_VERSION_ID, nullVersion.getVersionId());
+  }
+
+  @Test
+  public void testDeleteSuspendedEraCurrentByNullVersionId() throws Exception {
+    setupSuspendedBucket();
+    // suspended-era current matches the reserved null versionId even though
+    // it carries an internal versionId
+    String ozoneKey = seedCurrentVersion(300L, false, true);
+
+    OMClientResponse response = new OMKeyDeleteRequest(
+        deleteRequest(OmKeyInfo.NULL_VERSION_ID), getBucketLayout())
+        .validateAndUpdateCache(ozoneManager, 400L);
+    assertEquals(OzoneManagerProtocolProtos.Status.OK,
+        response.getOMResponse().getStatus());
+
+    assertNull(omMetadataManager.getKeyTable(getBucketLayout()).get(ozoneKey));
   }
 
   @Test

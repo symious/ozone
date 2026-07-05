@@ -77,6 +77,7 @@ public class OzoneKey {
    */
   private Long versionId;
   private boolean deleteMarker;
+  private boolean nullVersion;
 
   @SuppressWarnings("parameternumber")
   public OzoneKey(String volumeName, String bucketName,
@@ -233,6 +234,15 @@ public class OzoneKey {
     this.deleteMarker = deleteMarker;
   }
 
+  /** Whether this record is the key's "null version" (S3 versioning). */
+  public boolean isNullVersion() {
+    return nullVersion;
+  }
+
+  public void setNullVersion(boolean nullVersion) {
+    this.nullVersion = nullVersion;
+  }
+
   public boolean isFile() {
     return isFile;
   }
@@ -250,6 +260,7 @@ public class OzoneKey {
         keyInfo.getTags());
     key.setVersionId(keyInfo.getVersionId());
     key.setDeleteMarker(keyInfo.isDeleteMarker());
+    key.setNullVersion(keyInfo.isNullVersionRecord());
     return key;
   }
 

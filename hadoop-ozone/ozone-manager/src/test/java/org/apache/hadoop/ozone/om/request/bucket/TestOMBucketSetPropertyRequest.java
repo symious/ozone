@@ -427,8 +427,9 @@ public class TestOMBucketSetPropertyRequest extends TestBucketRequest {
   public void testVersioningStatusTransitions() throws Exception {
     String volumeName = UUID.randomUUID().toString();
     String bucketName = UUID.randomUUID().toString();
+    // an explicit versioning status is only supported on OBJECT_STORE buckets
     OMRequestTestUtils.addVolumeAndBucketToDB(volumeName, bucketName,
-        omMetadataManager);
+        omMetadataManager, BucketLayout.OBJECT_STORE);
     String bucketKey = omMetadataManager.getBucketKey(volumeName, bucketName);
 
     assertEquals(BucketVersioningStatus.UNVERSIONED,
