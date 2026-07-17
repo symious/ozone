@@ -3060,6 +3060,7 @@ public final class OzoneManager extends ServiceRuntimeInfoImpl
             .setDefaultReplicationConfig(
                 realBucket.getDefaultReplicationConfig())
             .setIsVersionEnabled(realBucket.getIsVersionEnabled())
+            .setVersioningStatus(realBucket.getVersioningStatus())
             .setStorageType(realBucket.getStorageType())
             .setQuotaInBytes(realBucket.getQuotaInBytes())
             .setQuotaInNamespace(realBucket.getQuotaInNamespace())
